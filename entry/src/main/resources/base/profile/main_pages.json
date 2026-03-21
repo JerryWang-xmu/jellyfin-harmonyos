@@ -1,0 +1,10 @@
+{
+  "src": [
+    "pages/MainPage",
+    "pages/Index",
+    "setup/ConnectPage",
+    "settings/SettingsPage",
+    "player/ui/PlayerPage",
+    "webapp/WebViewPage"
+  ]
+}

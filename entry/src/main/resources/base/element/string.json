@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Jellyfin HarmonyOS Application Module"
+    },
+    {
+      "name": "app_name",
+      "value": "Jellyfin"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Jellyfin Main Entry"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Jellyfin"
+    }
+  ]
+}

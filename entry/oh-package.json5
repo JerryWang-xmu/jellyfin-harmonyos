@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "Jellyfin HarmonyOS Entry Module",
+  "main": "",
+  "author": "",
+  "license": "MPL-2.0",
+  "dependencies": {}
+}

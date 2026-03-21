@@ -1,0 +1,170 @@
+/**
+ * Jellyfin HarmonyOS - WebView 桥接通道管理器
+ * 负责管理 WebView 与 Native 之间的双向通信
+ * 迁移自 jellyfin-android/webapp/WebappFunctionChannel.kt
+ */
+
+import webview from '@ohos.web.webview';
+import { Logger } from '../common/utils/Logger';
+
+/**
+ * 桥接通道配置
+ */
+export interface BridgeChannelConfig {
+  controller: webview.WebviewController;
+  onJavaScriptError?: (error: Error) => void;
+}
+
+/**
+ * JavaScript 执行结果
+ */
+export interface JavaScriptResult {
+  success: boolean;
+  result?: string;
+  error?: string;
+}
+
+/**
+ * 桥接通道类
+ * 封装 WebView 的 JavaScript 执行功能
+ */
+export class BridgeChannel {
+  private static readonly TAG: string = 'BridgeChannel';
+
+  private controller: webview.WebviewController;
+  private onJavaScriptError?: (error: Error) => void;
+  private initialized: boolean = false;
+
+  constructor(config: BridgeChannelConfig) {
+    this.controller = config.controller;
+    this.onJavaScriptError = config.onJavaScriptError;
+    Logger.i(BridgeChannel.TAG, 'BridgeChannel created');
+  }
+
+  /**
+   * 初始化桥接通道
+   */
+  async initialize(): Promise<void> {
+    if (this.initialized) {
+      Logger.w(BridgeChannel.TAG, 'BridgeChannel already initialized');
+      return;
+    }
+
+    try {
+      // 等待 WebView 准备就绪
+      this.initialized = true;
+      Logger.i(BridgeChannel.TAG, 'BridgeChannel initialized');
+    } catch (error) {
+      Logger.e(BridgeChannel.TAG, 'Failed to initialize BridgeChannel: %{public}s', JSON.stringify(error));
+      const err = error as Error;
+      throw new Error('Failed to initialize BridgeChannel: ' + (err?.message ?? 'unknown error'));
+    }
+  }
+
+  /**
+   * 执行 JavaScript 代码
+   * @param script JavaScript 代码
+   * @returns 执行结果
+   */
+  async runJavaScript(script: string): Promise<JavaScriptResult> {
+    if (!this.initialized) {
+      Logger.w(BridgeChannel.TAG, 'BridgeChannel not initialized');
+      return { success: false, error: 'BridgeChannel not initialized' };
+    }
+
+    try {
+      Logger.d(BridgeChannel.TAG, 'Running JavaScript: %{public}s', script.substring(0, 100));
+      const result = await this.controller.runJavaScript(script);
+      Logger.d(BridgeChannel.TAG, 'JavaScript result: %{public}s', result);
+      return { success: true, result };
+    } catch (error) {
+      const err = error as Error;
+      Logger.e(BridgeChannel.TAG, 'JavaScript execution failed: %{public}s', err.message);
+      this.onJavaScriptError?.(err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * 调用全局函数
+   * @param functionName 函数名 (如 "window.NativeShell.notifyEvent")
+   * @param args 参数列表
+   */
+  async callFunction(functionName: string, ...args: (string | number | boolean | object | null)[]): Promise<JavaScriptResult> {
+    const argsStr = args.map(arg => this.serializeArgument(arg)).join(', ');
+    const script = `${functionName}(${argsStr})`;
+    return this.runJavaScript(script);
+  }
+
+  /**
+   * 调用 window 上的方法
+   * @param methodName 方法名
+   * @param args 参数
+   */
+  async callWindowMethod(methodName: string, ...args: (string | number | boolean | object | null)[]): Promise<JavaScriptResult> {
+    return this.callFunction(`window.${methodName}`, ...args);
+  }
+
+  /**
+   * 通知外部播放器事件
+   * @param event 事件名称
+   * @param parameters 参数
+   */
+  async notifyExternalPlayerEvent(event: string, parameters: string = ''): Promise<JavaScriptResult> {
+    return this.callFunction(`window.ExtPlayer.notify${event}`, parameters);
+  }
+
+  /**
+   * 通知媒体会话更新
+   */
+  async notifyMediaSessionUpdate(): Promise<JavaScriptResult> {
+    return this.callWindowMethod('NativeShell', 'updateMediaSession');
+  }
+
+  /**
+   * Cast 回调
+   * @param action 动作名称
+   * @param keep 是否保持回调
+   * @param err 错误信息
+   * @param result 结果
+   */
+  async castCallback(action: string, keep: boolean, err: string | null, result: string | null): Promise<JavaScriptResult> {
+    const errArg = err ? `"${err}"` : 'null';
+    const resultArg = result ? result : 'null';
+    return this.callFunction(`window.NativeShell.castCallback`, action, keep, errArg, resultArg);
+  }
+
+  /**
+   * 序列化参数
+   */
+  private serializeArgument(arg: string | number | boolean | object | null): string {
+    if (arg === null || arg === undefined) {
+      return 'null';
+    }
+    if (typeof arg === 'string') {
+      return `"${arg.replace(/"/g, '\\"')}"`;
+    }
+    if (typeof arg === 'number' || typeof arg === 'boolean') {
+      return String(arg);
+    }
+    if (typeof arg === 'object') {
+      return JSON.stringify(arg);
+    }
+    return 'null';
+  }
+
+  /**
+   * 检查是否已初始化
+   */
+  isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  /**
+   * 销毁通道
+   */
+  destroy(): void {
+    this.initialized = false;
+    Logger.i(BridgeChannel.TAG, 'BridgeChannel destroyed');
+  }
+}
