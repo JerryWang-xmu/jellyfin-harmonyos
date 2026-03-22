@@ -209,12 +209,12 @@ export class JellyfinDatabase {
       throw new Error('Database not initialized');
     }
 
-    await this.rdbStore.beginTransaction();
+    this.rdbStore.beginTransaction();
     try {
       await action();
-      await this.rdbStore.commit();
+      this.rdbStore.commit();
     } catch (error) {
-      await this.rdbStore.rollBack();
+      this.rdbStore.rollBack();
       const err = error as Error;
       throw new Error('Transaction failed: ' + (err?.message ?? 'unknown error'));
     }

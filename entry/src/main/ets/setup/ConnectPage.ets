@@ -278,7 +278,7 @@ export struct ConnectPage {
               // 服务器列表
               ForEach(this.recentServers, (server: string) => {
                 this.RecentServerItem(server)
-              })
+              }, (server: string) => server)
             }
             .width('100%')
           }

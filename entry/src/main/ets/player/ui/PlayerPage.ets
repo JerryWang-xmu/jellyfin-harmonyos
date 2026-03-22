@@ -190,17 +190,22 @@ export struct PlayerPage {
   // ===== 播放初始化 =====
 
   private async initPlayback(): Promise<void> {
+    const errMsg = await this.doInitPlayback();
+    if (errMsg) {
+      this.errorMessage = errMsg;
+    }
+  }
+
+  private async doInitPlayback(): Promise<string> {
     if (!this.playOptions || this.playOptions.ids.length === 0) {
-      this.errorMessage = '无效的播放参数';
-      return;
+      return '无效的播放参数';
     }
 
     try {
       this.apiService = new JellyfinApiService(App.apiController.config);
     } catch (e) {
-      this.errorMessage = '服务未就绪，请重新登录';
       AppLog.e(TAG, 'App.apiController not ready: %{public}s', JSON.stringify(e));
-      return;
+      return '服务未就绪，请重新登录';
     }
 
     const startIdx = this.playOptions.startIndex ?? 0;
@@ -221,8 +226,7 @@ export struct PlayerPage {
       this.currentPlaySessionId = playbackInfo.PlaySessionId ?? '';
       const source = playbackInfo.MediaSources?.[0];
       if (!source) {
-        this.errorMessage = '无法获取媒体源';
-        return;
+        return '无法获取媒体源';
       }
 
       // 2. 构建流 URL
@@ -250,9 +254,11 @@ export struct PlayerPage {
           : 0,
       });
 
+      return '';
+
     } catch (err) {
-      this.errorMessage = '播放初始化失败：' + JSON.stringify(err);
       AppLog.e(TAG, 'PlayerPage init error: %{public}s', JSON.stringify(err));
+      return '播放初始化失败：' + JSON.stringify(err);
     }
   }
 
