@@ -74,12 +74,12 @@ export default class EntryAbility extends UIAbility {
     };
 
     const loadPage = (stage: window.WindowStage): void => {
-      stage.loadContent('pages/MainPage', (err) => {
+      stage.loadContent('pages/AppRoot', (err) => {
         if (err.code) {
           hilog.error(DOMAIN, TAG, 'Failed to load the content. Cause: %{public}s', JSON.stringify(err));
           return;
         }
-        hilog.info(DOMAIN, TAG, 'Succeeded in loading MainPage.');
+        hilog.info(DOMAIN, TAG, 'Succeeded in loading AppRoot.');
         try {
           setupImmersive(stage.getMainWindowSync());
         } catch (e) {

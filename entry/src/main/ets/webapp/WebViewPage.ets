@@ -4,24 +4,24 @@
  */
 
 import webview from '@ohos.web.webview';
-import { router } from '@kit.ArkUI';
 import window from '@ohos.window';
 import { BridgeManager, BridgeManagerConfig } from '../bridge/BridgeManager';
 import { App, getContext } from '../core/di/AppDependency';
 import { ActivityEventType, ChangeFullscreenPayload } from '../core/event/ActivityEvent';
 import { AppLog } from '../common/utils/Logger';
+import { NAV_DEST_CONNECT } from '../pages/NavDestinationNames';
 
-interface WebViewPageParams {
+export interface WebViewPageParams {
   serverUrl: string;
   serverId: number;
 }
 
-@Entry
 @Component
-struct WebViewPage {
-  private params: WebViewPageParams = router.getParams() as WebViewPageParams;
-  @State serverUrl: string = this.params?.serverUrl ?? '';
-  @State serverId: number = this.params?.serverId ?? 0;
+export struct WebViewPage {
+  webViewParams: WebViewPageParams = { serverUrl: '', serverId: 0 };
+  @Consume('navPathStack') navPathStack: NavPathStack;
+  @State serverUrl: string = '';
+  @State serverId: number = 0;
   @State isLoading: boolean = true;
   @State loadError: boolean = false;
   @State loadErrorMsg: string = '';
@@ -33,10 +33,12 @@ struct WebViewPage {
   private unsubscribeFullscreen: (() => void) | null = null;
 
   aboutToAppear() {
+    this.serverUrl = this.webViewParams.serverUrl;
+    this.serverId = this.webViewParams.serverId;
     AppLog.i('WebViewPage.aboutToAppear, url=%{public}s', this.serverUrl);
     if (!this.serverUrl) {
       AppLog.e('WebViewPage: serverUrl is empty, redirect to ConnectPage');
-      try { router.replaceUrl({ url: 'setup/ConnectPage' }); } catch { /* ignore */ }
+      try { this.navPathStack.replacePath({ name: NAV_DEST_CONNECT }); } catch { /* ignore */ }
       return;
     }
     // 启动加载超时计时（10 秒）
@@ -72,128 +74,136 @@ struct WebViewPage {
     this.bridgeManager = null;
   }
 
-  onBackPress(): boolean {
-    // 先尝试 WebView 内部返回
-    try {
-      if (this.controller.accessBackward()) {
-        this.controller.backward();
-        return true;
-      }
-    } catch (e) {
-      AppLog.e('WebViewPage: accessBackward error: %{public}s', JSON.stringify(e));
-    }
-    return false;
-  }
-
   build() {
-    Stack() {
-      // WebView 主体
-      Web({ src: this.serverUrl, controller: this.controller })
-        .javaScriptAccess(true)
-        .domStorageAccess(true)
-        .fileAccess(true)
-        .onlineImageAccess(true)
-        .mixedMode(MixedMode.All)
-        .cacheMode(CacheMode.Default)
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#000000')
-        .onControllerAttached(async () => {
-          // 关键：Bridge 注册必须在此处，注册前 WebView 控制器尚未绑定
-          await this.initBridgeManager();
-        })
-        .onPageBegin(() => {
-          AppLog.i('WebViewPage: onPageBegin');
-          this.isLoading = true;
-          this.loadError = false;
-        })
-        .onPageEnd(() => {
-          AppLog.i('WebViewPage: onPageEnd');
-          clearTimeout(this.loadTimeoutId);
-          this.loadTimeoutId = -1;
-          this.isLoading = false;
-          this.injectFullscreenBridge();
-        })
-        .onErrorReceive((event) => {
-          // 只处理主框架加载失败，忽略子资源（XHR/fetch）错误
-          // 屏幕旋转等配置变化可能导致子资源请求中断触发此回调
-          if (!event?.request?.isMainFrame()) {
-            return;
+    NavDestination() {
+      Stack() {
+        // WebView 主体
+        Web({ src: this.serverUrl, controller: this.controller })
+          .javaScriptAccess(true)
+          .domStorageAccess(true)
+          .fileAccess(true)
+          .onlineImageAccess(true)
+          .mixedMode(MixedMode.All)
+          .cacheMode(CacheMode.Default)
+          .width('100%')
+          .height('100%')
+          .backgroundColor('#000000')
+          .onControllerAttached(async () => {
+            // 关键：Bridge 注册必须在此处，注册前 WebView 控制器尚未绑定
+            await this.initBridgeManager();
+          })
+          .onPageBegin(() => {
+            AppLog.i('WebViewPage: onPageBegin');
+            this.isLoading = true;
+            this.loadError = false;
+          })
+          .onPageEnd(() => {
+            AppLog.i('WebViewPage: onPageEnd');
+            clearTimeout(this.loadTimeoutId);
+            this.loadTimeoutId = -1;
+            this.isLoading = false;
+            this.injectFullscreenBridge();
+          })
+          .onErrorReceive((event) => {
+            // 只处理主框架加载失败，忽略子资源（XHR/fetch）错误
+            // 屏幕旋转等配置变化可能导致子资源请求中断触发此回调
+            if (!event?.request?.isMainFrame()) {
+              return;
+            }
+            const msg: string = event?.error?.getErrorInfo() ?? '加载失败';
+            AppLog.e('WebViewPage: onErrorReceive (main frame): %{public}s', msg);
+            clearTimeout(this.loadTimeoutId);
+            this.loadTimeoutId = -1;
+            this.isLoading = false;
+            this.loadError = true;
+            this.loadErrorMsg = msg;
+          })
+
+        // 加载指示器覆盖层
+        if (this.isLoading) {
+          Column() {
+            LoadingProgress()
+              .width(48)
+              .height(48)
+              .color($r('app.color.primary'))
           }
-          const msg: string = event?.error?.getErrorInfo() ?? '加载失败';
-          AppLog.e('WebViewPage: onErrorReceive (main frame): %{public}s', msg);
-          clearTimeout(this.loadTimeoutId);
-          this.loadTimeoutId = -1;
-          this.isLoading = false;
-          this.loadError = true;
-          this.loadErrorMsg = msg;
-        })
-
-      // 加载指示器覆盖层
-      if (this.isLoading) {
-        Column() {
-          LoadingProgress()
-            .width(48)
-            .height(48)
-            .color($r('app.color.primary'))
+          .width('100%')
+          .height('100%')
+          .justifyContent(FlexAlign.Center)
+          .backgroundColor('#000000')
         }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-        .backgroundColor('#000000')
-      }
 
-      // 错误提示覆盖层
-      if (this.loadError) {
-        Column({ space: 16 }) {
-          Text('连接失败')
-            .fontSize(20)
-            .fontColor('#ffffff')
-            .fontWeight(FontWeight.Bold)
+        // 错误提示覆盖层
+        if (this.loadError) {
+          Column({ space: 16 }) {
+            Text('连接失败')
+              .fontSize(20)
+              .fontColor('#ffffff')
+              .fontWeight(FontWeight.Bold)
 
-          Text(this.loadErrorMsg)
-            .fontSize(14)
-            .fontColor('#b0b0b0')
-            .textAlign(TextAlign.Center)
-            .padding({ left: 32, right: 32 })
+            Text(this.loadErrorMsg)
+              .fontSize(14)
+              .fontColor('#b0b0b0')
+              .textAlign(TextAlign.Center)
+              .padding({ left: 32, right: 32 })
 
-          Button('重试')
-            .width(120)
-            .height(44)
-            .backgroundColor('#00a4dc')
-            .fontColor('#ffffff')
-            .onClick(() => {
-              this.loadError = false;
-              this.isLoading = true;
-              // 重置超时计时器
-              this.loadTimeoutId = setTimeout(() => {
-                if (this.isLoading) {
-                  this.isLoading = false;
-                  this.loadError = true;
-                  this.loadErrorMsg = '连接超时，请检查服务器地址';
-                }
-              }, 10000) as number;
-              this.controller.loadUrl(this.serverUrl);
-            })
+            Button('重试')
+              .width(120)
+              .height(44)
+              .backgroundColor('#00a4dc')
+              .fontColor('#ffffff')
+              .onClick(() => {
+                this.loadError = false;
+                this.isLoading = true;
+                // 重置超时计时器
+                this.loadTimeoutId = setTimeout(() => {
+                  if (this.isLoading) {
+                    this.isLoading = false;
+                    this.loadError = true;
+                    this.loadErrorMsg = '连接超时，请检查服务器地址';
+                  }
+                }, 10000) as number;
+                this.controller.loadUrl(this.serverUrl);
+              })
 
-          Button('更改服务器')
-            .width(120)
-            .height(44)
-            .backgroundColor('#2d2d2d')
-            .fontColor('#ffffff')
-            .onClick(() => {
-              router.replaceUrl({ url: 'setup/ConnectPage' });
-            })
+            Button('更改服务器')
+              .width(120)
+              .height(44)
+              .backgroundColor('#2d2d2d')
+              .fontColor('#ffffff')
+              .onClick(() => {
+                this.navPathStack.replacePath({ name: NAV_DEST_CONNECT });
+              })
+          }
+          .width('100%')
+          .height('100%')
+          .padding(32)
+          .justifyContent(FlexAlign.Center)
+          .backgroundColor('#0f0f0f')
         }
-        .width('100%')
-        .height('100%')
-        .padding(32)
-        .justifyContent(FlexAlign.Center)
-        .backgroundColor('#0f0f0f')
       }
+      .width('100%')
+      .height('100%')
     }
-    .width('100%')
-    .height('100%')
+    .hideTitleBar(true)
+    .onBackPressed(() => {
+      // 先尝试 WebView 内部返回
+      try {
+        if (this.controller.accessBackward()) {
+          this.controller.backward();
+          return true;
+        }
+      } catch (e) {
+        AppLog.e('WebViewPage: accessBackward error: %{public}s', JSON.stringify(e));
+      }
+      // WebView 无历史可退 → 退出应用，避免 pop 后暴露空白根页面
+      try {
+        (getContext() as ESObject).terminateSelf();
+      } catch (e) {
+        AppLog.e('WebViewPage: terminateSelf error: %{public}s', JSON.stringify(e));
+      }
+      return true;
+    })
   }
 
   /**

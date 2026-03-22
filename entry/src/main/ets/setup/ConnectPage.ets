@@ -5,14 +5,19 @@
  * UI 对齐 design/UI/首页.png 及 UI_SPEC.md Section 5.1
  */
 
-import { router } from '@kit.ArkUI';
 import { AppLog } from '../common/utils/Logger';
 import { App } from '../core/di/AppDependency';
 import { ConnectionHelper, CheckUrlSuccess, CheckUrlError } from './ConnectionHelper';
+import { NAV_DEST_WEBVIEW } from '../pages/NavDestinationNames';
 
-@Entry
+interface ConnectWebViewParam {
+  serverUrl: string;
+  serverId: number;
+}
+
 @Component
-struct ConnectPage {
+export struct ConnectPage {
+  @Consume('navPathStack') navPathStack: NavPathStack;
   @StorageProp('topRectHeight') topRectHeight: number = 0;
   @State serverUrl: string = '';
   @State isConnecting: boolean = false;
@@ -50,10 +55,8 @@ struct ConnectPage {
       try {
         const serverId = await App.apiController.setupServer(successResult.url);
         // 导航到 WebViewPage
-        router.replaceUrl({
-          url: 'webapp/WebViewPage',
-          params: { serverUrl: successResult.url, serverId: serverId }
-        });
+        const navParam: ConnectWebViewParam = { serverUrl: successResult.url, serverId: serverId };
+        this.navPathStack.replacePath({ name: NAV_DEST_WEBVIEW, param: navParam as Object });
       } catch (err) {
         this.errorMessage = '保存服务器信息失败';
         AppLog.e('Setup server error: %{public}s', JSON.stringify(err));
@@ -127,141 +130,148 @@ struct ConnectPage {
   }
 
   build() {
-    Column() {
-      // ===== 顶部导航栏（56vp）=====
-      Row() {
-        // 返回箭头
-        Text('\u2190')
-          .fontSize(24)
-          .fontColor('#ffffff')
-          .width(40)
-          .height(40)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            router.back();
-          })
-
-        // Jellyfin Logo
-        this.JellyfinLogo()
-
-        Blank()
-      }
-      .width('100%')
-      .height(56 + this.topRectHeight)
-      .padding({ left: 8, right: 16, top: this.topRectHeight })
-      .alignItems(VerticalAlign.Center)
-
-      // ===== 主内容区 =====
+    NavDestination() {
       Column() {
-        // 顶部间距
-        Blank().height(32)
+        // ===== 顶部导航栏（56vp）=====
+        Row() {
+          // 返回箭头
+          Text('\u2190')
+            .fontSize(24)
+            .fontColor('#ffffff')
+            .width(40)
+            .height(40)
+            .textAlign(TextAlign.Center)
+            .onClick(() => {
+              this.navPathStack.pop();
+            })
 
-        // "连接到服务器" 大标题
-        Text('连接到服务器')
-          .fontSize(32)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#ffffff')
-          .width('100%')
-          .textAlign(TextAlign.Start)
-          .margin({ bottom: 16 })
+          // Jellyfin Logo
+          this.JellyfinLogo()
 
-        // "主机" 标签
-        Text('主机')
-          .fontSize(14)
-          .fontColor('#b0b0b0')
-          .width('100%')
-          .textAlign(TextAlign.Start)
-          .margin({ bottom: 8 })
+          Blank()
+        }
+        .width('100%')
+        .height(56 + this.topRectHeight)
+        .padding({ left: 8, right: 16, top: this.topRectHeight })
+        .alignItems(VerticalAlign.Center)
 
-        // 深色输入框
-        TextInput({
-          text: this.serverUrl,
-          placeholder: '192.168.1.100:8096 或 https://myserver.com'
-        })
-          .width('100%')
-          .height(48)
-          .backgroundColor('#1e1e1e')
-          .borderRadius(4)
-          .fontSize(16)
-          .fontColor('#ffffff')
-          .placeholderColor('#888888')
-          .placeholderFont({ size: 16 })
-          .padding({ left: 12, right: 12 })
-          .onChange((value: string) => {
-            this.serverUrl = value;
-          })
+        // ===== 主内容区 =====
+        Column() {
+          // 顶部间距
+          Blank().height(32)
 
-        // 错误提示
-        if (this.errorMessage) {
-          Text(this.errorMessage)
-            .fontSize(14)
-            .fontColor('#ff4444')
+          // "连接到服务器" 大标题
+          Text('连接到服务器')
+            .fontSize(32)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#ffffff')
             .width('100%')
             .textAlign(TextAlign.Start)
-            .margin({ top: 8 })
-        }
+            .margin({ bottom: 16 })
 
-        // 间距
-        Blank().height(24)
+          // "主机" 标签
+          Text('主机')
+            .fontSize(14)
+            .fontColor('#b0b0b0')
+            .width('100%')
+            .textAlign(TextAlign.Start)
+            .margin({ bottom: 8 })
 
-        // "连接" 主按钮（青蓝色）
-        Button(this.isConnecting ? '连接中...' : '连接')
-          .width('100%')
-          .height(48)
-          .borderRadius(4)
-          .fontSize(16)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#ffffff')
-          .backgroundColor(this.isConnecting ? '#0085b3' : '#00a4dc')
-          .enabled(!this.isConnecting && this.serverUrl.trim().length > 0)
-          .onClick(() => {
-            this.connectToServer();
+          // 深色输入框
+          TextInput({
+            text: this.serverUrl,
+            placeholder: '192.168.1.100:8096 或 https://myserver.com'
           })
+            .width('100%')
+            .height(48)
+            .backgroundColor('#1e1e1e')
+            .borderRadius(4)
+            .fontSize(16)
+            .fontColor('#ffffff')
+            .placeholderColor('#888888')
+            .placeholderFont({ size: 16 })
+            .padding({ left: 12, right: 12 })
+            .onChange((value: string) => {
+              this.serverUrl = value;
+            })
 
-        // "取消" 次要按钮（暗色，有历史服务器时显示）
-        if (this.recentServers.length > 0) {
-          Blank().height(8)
+          // 错误提示
+          if (this.errorMessage) {
+            Text(this.errorMessage)
+              .fontSize(14)
+              .fontColor('#ff4444')
+              .width('100%')
+              .textAlign(TextAlign.Start)
+              .margin({ top: 8 })
+          }
 
-          Button('取消')
+          // 间距
+          Blank().height(24)
+
+          // "连接" 主按钮（青蓝色）
+          Button(this.isConnecting ? '连接中...' : '连接')
             .width('100%')
             .height(48)
             .borderRadius(4)
             .fontSize(16)
+            .fontWeight(FontWeight.Medium)
             .fontColor('#ffffff')
-            .backgroundColor('#2d2d2d')
+            .backgroundColor(this.isConnecting ? '#0085b3' : '#00a4dc')
+            .enabled(!this.isConnecting && this.serverUrl.trim().length > 0)
             .onClick(() => {
-              router.back();
+              this.connectToServer();
             })
-        }
 
-        // ===== 历史服务器区 =====
-        if (this.recentServers.length > 0) {
-          Column() {
-            // "最近使用" 标题
-            Text('最近使用')
-              .fontSize(14)
-              .fontColor('#b0b0b0')
+          // "取消" 次要按钮（暗色，有历史服务器时显示）
+          if (this.recentServers.length > 0) {
+            Blank().height(8)
+
+            Button('取消')
               .width('100%')
-              .textAlign(TextAlign.Start)
-              .margin({ top: 32, bottom: 8 })
-
-            // 服务器列表
-            ForEach(this.recentServers, (server: string) => {
-              this.RecentServerItem(server)
-            })
+              .height(48)
+              .borderRadius(4)
+              .fontSize(16)
+              .fontColor('#ffffff')
+              .backgroundColor('#2d2d2d')
+              .onClick(() => {
+                this.navPathStack.pop();
+              })
           }
-          .width('100%')
+
+          // ===== 历史服务器区 =====
+          if (this.recentServers.length > 0) {
+            Column() {
+              // "最近使用" 标题
+              Text('最近使用')
+                .fontSize(14)
+                .fontColor('#b0b0b0')
+                .width('100%')
+                .textAlign(TextAlign.Start)
+                .margin({ top: 32, bottom: 8 })
+
+              // 服务器列表
+              ForEach(this.recentServers, (server: string) => {
+                this.RecentServerItem(server)
+              })
+            }
+            .width('100%')
+          }
         }
+        .width('100%')
+        .padding({ left: 16, right: 16 })
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
-      .padding({ left: 16, right: 16 })
-      .layoutWeight(1)
+      .height('100%')
+      .backgroundColor('#0f0f0f')
       .alignItems(HorizontalAlign.Start)
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#0f0f0f')
-    .alignItems(HorizontalAlign.Start)
+    .hideTitleBar(true)
+    .onBackPressed(() => {
+      this.navPathStack.pop();
+      return true;
+    })
   }
 }
 

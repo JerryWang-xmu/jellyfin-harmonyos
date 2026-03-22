@@ -82,6 +82,9 @@ export class AppDependency {
   private _currentServer: ServerEntity | null = null;
   private _currentUser: UserEntity | null = null;
 
+  // Navigation stack（由 AppRoot 注册，供事件回调驱动导航）
+  private _navPathStack: NavPathStack | null = null;
+
   // State
   private _state: AppState = AppState.UNINITIALIZED;
   private _initError: Error | null = null;
@@ -179,6 +182,7 @@ export class AppDependency {
     this._apiController = null;
     this._currentServer = null;
     this._currentUser = null;
+    this._navPathStack = null;
     this._state = AppState.UNINITIALIZED;
     this._initError = null;
 
@@ -297,6 +301,24 @@ export class AppDependency {
    */
   get isLoggedIn(): boolean {
     return this._currentServer !== null && this._currentUser !== null;
+  }
+
+  /**
+   * 注册 Navigation 路径栈（由 AppRoot 在 aboutToAppear 中调用）
+   */
+  setNavPathStack(stack: NavPathStack): void {
+    this._navPathStack = stack;
+  }
+
+  /**
+   * 获取 Navigation 路径栈（供事件回调驱动导航）
+   * @throws Error if not set
+   */
+  get navPathStack(): NavPathStack {
+    if (!this._navPathStack) {
+      throw new Error('NavPathStack not set. Call setNavPathStack() first.');
+    }
+    return this._navPathStack;
   }
 
   // ==================== Private Methods ====================

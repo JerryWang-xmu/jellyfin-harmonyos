@@ -3,15 +3,15 @@
  * 对齐接口契约 Section h SettingsPage 定义
  */
 
-import { router } from '@kit.ArkUI';
 import { App } from '../core/di/AppDependency';
 import { ActivityEventType } from '../core/event/ActivityEvent';
 import { Constants } from '../common/constants/Constants';
 import { AppLog } from '../common/utils/Logger';
+import { NAV_DEST_CONNECT } from '../pages/NavDestinationNames';
 
-@Entry
 @Component
-struct SettingsPage {
+export struct SettingsPage {
+  @Consume('navPathStack') navPathStack: NavPathStack;
   @StorageProp('topRectHeight') topRectHeight: number = 0;
   @State videoPlayerType: string = 'web';
   @State exoPlayerAllowSwipeGestures: boolean = true;
@@ -131,108 +131,115 @@ struct SettingsPage {
   }
 
   build() {
-    Column() {
-      // 顶部导航栏
-      Row() {
-        Image($r('sys.media.ohos_ic_back'))
-          .width(24)
-          .height(24)
-          .fillColor('#ffffff')
-          .onClick(() => router.back())
+    NavDestination() {
+      Column() {
+        // 顶部导航栏
+        Row() {
+          Image($r('sys.media.ohos_ic_back'))
+            .width(24)
+            .height(24)
+            .fillColor('#ffffff')
+            .onClick(() => this.navPathStack.pop())
 
-        Text('设置')
-          .fontSize(18)
-          .fontColor('#ffffff')
-          .fontWeight(FontWeight.Bold)
-          .margin({ left: 16 })
-
-        Blank()
-      }
-      .width('100%')
-      .height(56 + this.topRectHeight)
-      .padding({ left: 16, right: 16, top: this.topRectHeight })
-      .backgroundColor('#0f0f0f')
-
-      Scroll() {
-        Column() {
-          // 服务器信息
-          this.SectionHeader('服务器')
-
-          this.SettingItem('服务器地址', this.serverName, () => {
-            // 只读展示，不跳转
-          })
-
-          this.NavigationItem('更改服务器', '', () => {
-            App.eventHandler.emit({ type: ActivityEventType.SELECT_SERVER, payload: undefined });
-          })
-
-          Divider()
-            .color('#2a2a2a')
+          Text('设置')
+            .fontSize(18)
+            .fontColor('#ffffff')
+            .fontWeight(FontWeight.Bold)
             .margin({ left: 16 })
 
-          // 播放器
-          this.SectionHeader('播放器')
-
-          this.ToggleItem(
-            '允许手势控制（亮度/音量）',
-            this.exoPlayerAllowSwipeGestures,
-            (v: boolean) => {
-              this.exoPlayerAllowSwipeGestures = v;
-              // 通过 rawPreferences 写回，因为 AppPreferences 只暴露 getter
-              App.preferences.getRawPreferences()?.putSync(
-                Constants.PREF_EXOPLAYER_ALLOW_SWIPE_GESTURES, v
-              );
-            }
-          )
-
-          Divider()
-            .color('#2a2a2a')
-            .margin({ left: 16 })
-
-          // 关于
-          this.SectionHeader('关于')
-
-          this.SettingItem('版本', this.appVersion, () => {
-            // 只读展示
-          })
-
-          Divider()
-            .color('#2a2a2a')
-            .margin({ left: 16 })
-
-          // 账户
-          this.SectionHeader('账户')
-
-          Row() {
-            Text('注销')
-              .fontSize(16)
-              .fontColor('#ff4444')
-              .layoutWeight(1)
-          }
-          .width('100%')
-          .height(56)
-          .padding({ left: 16, right: 16 })
-          .onClick(async () => {
-            try {
-              AppLog.i('SettingsPage: sign out');
-              // 清除 access token 并跳回连接页
-              App.apiController.config.accessToken = undefined;
-              await App.clear();
-              router.replaceUrl({ url: 'setup/ConnectPage' });
-            } catch (err) {
-              AppLog.e('SettingsPage: sign out error: %{public}s', JSON.stringify(err));
-            }
-          })
+          Blank()
         }
         .width('100%')
-        .alignItems(HorizontalAlign.Start)
+        .height(56 + this.topRectHeight)
+        .padding({ left: 16, right: 16, top: this.topRectHeight })
+        .backgroundColor('#0f0f0f')
+
+        Scroll() {
+          Column() {
+            // 服务器信息
+            this.SectionHeader('服务器')
+
+            this.SettingItem('服务器地址', this.serverName, () => {
+              // 只读展示，不跳转
+            })
+
+            this.NavigationItem('更改服务器', '', () => {
+              App.eventHandler.emit({ type: ActivityEventType.SELECT_SERVER, payload: undefined });
+            })
+
+            Divider()
+              .color('#2a2a2a')
+              .margin({ left: 16 })
+
+            // 播放器
+            this.SectionHeader('播放器')
+
+            this.ToggleItem(
+              '允许手势控制（亮度/音量）',
+              this.exoPlayerAllowSwipeGestures,
+              (v: boolean) => {
+                this.exoPlayerAllowSwipeGestures = v;
+                // 通过 rawPreferences 写回，因为 AppPreferences 只暴露 getter
+                App.preferences.getRawPreferences()?.putSync(
+                  Constants.PREF_EXOPLAYER_ALLOW_SWIPE_GESTURES, v
+                );
+              }
+            )
+
+            Divider()
+              .color('#2a2a2a')
+              .margin({ left: 16 })
+
+            // 关于
+            this.SectionHeader('关于')
+
+            this.SettingItem('版本', this.appVersion, () => {
+              // 只读展示
+            })
+
+            Divider()
+              .color('#2a2a2a')
+              .margin({ left: 16 })
+
+            // 账户
+            this.SectionHeader('账户')
+
+            Row() {
+              Text('注销')
+                .fontSize(16)
+                .fontColor('#ff4444')
+                .layoutWeight(1)
+            }
+            .width('100%')
+            .height(56)
+            .padding({ left: 16, right: 16 })
+            .onClick(async () => {
+              try {
+                AppLog.i('SettingsPage: sign out');
+                // 清除 access token 并跳回连接页
+                App.apiController.config.accessToken = undefined;
+                await App.clear();
+                this.navPathStack.replacePath({ name: NAV_DEST_CONNECT });
+              } catch (err) {
+                AppLog.e('SettingsPage: sign out error: %{public}s', JSON.stringify(err));
+              }
+            })
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        }
+        .layoutWeight(1)
+        .width('100%')
       }
-      .layoutWeight(1)
       .width('100%')
+      .height('100%')
+      .backgroundColor('#0f0f0f')
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#0f0f0f')
+    .hideTitleBar(true)
+    .onBackPressed(() => {
+      this.navPathStack.pop();
+      return true;
+    })
   }
 }
 

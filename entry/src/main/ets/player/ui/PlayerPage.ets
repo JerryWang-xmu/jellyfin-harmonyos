@@ -3,7 +3,6 @@
  * Batch 4：完整实现 AVPlayer 原生播放
  */
 
-import { router } from '@kit.ArkUI';
 import window from '@ohos.window';
 import {
   AVPlayerAdapter
@@ -26,7 +25,7 @@ import { AppLog } from '../../common/utils/Logger';
 const TAG: string = 'PlayerPage';
 
 // ===== 路由参数接口 =====
-interface PlayerPageParams {
+export interface PlayerPageParams {
   playOptions: string; // JSON 序列化的 PlayOptions
 }
 
@@ -107,13 +106,13 @@ class PlayerPageListener extends PlayerEventListener {
   }
 }
 
-@Entry
 @Component
-struct PlayerPage {
-  // ===== 路由参数 =====
-  private playOptionsJson: string =
-    (router.getParams() as PlayerPageParams)?.playOptions ?? '{}';
+export struct PlayerPage {
+  // ===== Navigation 参数 =====
+  playerParams: PlayerPageParams = { playOptions: '{}' };
+  @Consume('navPathStack') navPathStack: NavPathStack;
   private playOptions: PlayOptions | null = null;
+  private playOptionsJson: string = '{}';
 
   // ===== UI 状态 =====
   @State isPlaying: boolean = false;
@@ -144,6 +143,7 @@ struct PlayerPage {
   // ===== 生命周期 =====
 
   aboutToAppear() {
+    this.playOptionsJson = this.playerParams.playOptions;
     try {
       this.playOptions = JSON.parse(this.playOptionsJson) as PlayOptions;
     } catch {
@@ -159,11 +159,6 @@ struct PlayerPage {
     this.player?.release();
     this.player = null;
     this.restoreSystemBars();
-  }
-
-  onBackPress(): boolean {
-    this.handleExit();
-    return true;
   }
 
   // ===== 播放初始化 =====
@@ -410,7 +405,7 @@ struct PlayerPage {
       this.reportPlaybackStop(false);
       this.currentItemId = '';
     }
-    router.back();
+    this.navPathStack.pop();
   }
 
   private showControlsTemporarily(): void {
@@ -580,75 +575,82 @@ struct PlayerPage {
   // ===== 主 build =====
 
   build() {
-    Stack() {
-      // 黑色背景
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#000000')
+    NavDestination() {
+      Stack() {
+        // 黑色背景
+        Column()
+          .width('100%')
+          .height('100%')
+          .backgroundColor('#000000')
 
-      // 视频画面
-      this.VideoSurface()
+        // 视频画面
+        this.VideoSurface()
 
-      // 透明点击层：显示/隐藏控制栏
-      Column()
-        .width('100%')
-        .height('100%')
-        .onClick(() => this.showControlsTemporarily())
+        // 透明点击层：显示/隐藏控制栏
+        Column()
+          .width('100%')
+          .height('100%')
+          .onClick(() => this.showControlsTemporarily())
 
-      // 缓冲指示器
-      if (this.isBuffering) {
-        Column() {
-          LoadingProgress()
-            .width(48)
-            .height(48)
-            .color('#00a4dc')
+        // 缓冲指示器
+        if (this.isBuffering) {
+          Column() {
+            LoadingProgress()
+              .width(48)
+              .height(48)
+              .color('#00a4dc')
+          }
+          .width('100%')
+          .height('100%')
+          .justifyContent(FlexAlign.Center)
         }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-      }
 
-      // 错误提示
-      if (this.errorMessage) {
-        Column({ space: 16 }) {
-          Text('播放错误')
-            .fontSize(18)
-            .fontColor('#ffffff')
-            .fontWeight(FontWeight.Bold)
-          Text(this.errorMessage)
-            .fontSize(14)
-            .fontColor('#b0b0b0')
-            .textAlign(TextAlign.Center)
-          Button('返回')
-            .backgroundColor('#2d2d2d')
-            .onClick(() => this.handleExit())
+        // 错误提示
+        if (this.errorMessage) {
+          Column({ space: 16 }) {
+            Text('播放错误')
+              .fontSize(18)
+              .fontColor('#ffffff')
+              .fontWeight(FontWeight.Bold)
+            Text(this.errorMessage)
+              .fontSize(14)
+              .fontColor('#b0b0b0')
+              .textAlign(TextAlign.Center)
+            Button('返回')
+              .backgroundColor('#2d2d2d')
+              .onClick(() => this.handleExit())
+          }
+          .width('100%')
+          .height('100%')
+          .padding(32)
+          .justifyContent(FlexAlign.Center)
+          .backgroundColor('#CC000000')
         }
-        .width('100%')
-        .height('100%')
-        .padding(32)
-        .justifyContent(FlexAlign.Center)
-        .backgroundColor('#CC000000')
-      }
 
-      // 控制覆盖层
-      if (this.showControls) {
-        Column() {
-          this.TopBar()
-          Blank()
-          this.BottomControls()
+        // 控制覆盖层
+        if (this.showControls) {
+          Column() {
+            this.TopBar()
+            Blank()
+            this.BottomControls()
+          }
+          .width('100%')
+          .height('100%')
         }
-        .width('100%')
-        .height('100%')
       }
+      .width('100%')
+      .height('100%')
+      .backgroundColor('#000000')
+      .gesture(
+        TapGesture({ count: 1 })
+          .onAction(() => this.showControlsTemporarily())
+      )
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#000000')
-    .gesture(
-      TapGesture({ count: 1 })
-        .onAction(() => this.showControlsTemporarily())
-    )
+    .hideTitleBar(true)
+    .onBackPressed(() => {
+      this.handleExit();
+      return true;
+    })
   }
 
   // ===== 工具方法 =====

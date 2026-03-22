@@ -1,11 +1,5 @@
 {
   "src": [
-    "pages/MainPage",
-    "pages/Index",
-    "setup/ConnectPage",
-    "webapp/WebViewPage",
-    "player/ui/PlayerPage",
-    "settings/SettingsPage",
-    "downloads/DownloadsPage"
+    "pages/AppRoot"
   ]
 }
