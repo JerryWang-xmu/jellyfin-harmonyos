@@ -1,6 +1,20 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\10716\\.ohos\\config\\default_jellyfin-harmonyos_CmqiVBTSVXfK2H6w3jH54ofGacv_ZXrt72txXjsTANg=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001BC185DE9D3CD540317414549B594708F2B3E2FD4952F2E9AB507F24FB5558F58CF5D15F1AE1C52C",
+          "profile": "C:\\Users\\10716\\.ohos\\config\\default_jellyfin-harmonyos_CmqiVBTSVXfK2H6w3jH54ofGacv_ZXrt72txXjsTANg=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\10716\\.ohos\\config\\default_jellyfin-harmonyos_CmqiVBTSVXfK2H6w3jH54ofGacv_ZXrt72txXjsTANg=.p12",
+          "storePassword": "0000001BD110978715191D4FE9C71E8EF342482F796E69F7EC4BA43AF27D292692397253C69A4C99FF2234"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",

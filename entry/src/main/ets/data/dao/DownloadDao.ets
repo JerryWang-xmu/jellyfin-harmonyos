@@ -8,7 +8,7 @@
 import relationalStore from '@ohos.data.relationalStore';
 import hilog from '@ohos.hilog';
 
-import { DownloadEntity, DownloadEntityHelper } from '../entity/DownloadEntity';
+import { DownloadEntity, DownloadEntityHelper, DownloadStatus } from '../entity/DownloadEntity';
 
 const LOG_DOMAIN: number = 0xFF00;
 const LOG_TAG: string = 'DownloadDao';
@@ -23,14 +23,18 @@ export class DownloadDao {
   /**
    * Insert or replace a download record.
    * Equivalent to @Insert(onConflict = OnConflictStrategy.REPLACE)
-   * @param entity DownloadEntity to insert/replace
+   * @param entity DownloadEntity to insert/replace (without id)
    * @returns The row ID of the inserted download
    */
   async insert(entity: DownloadEntity): Promise<number> {
     try {
       const valueBucket: relationalStore.ValuesBucket = {
         item_id: entity.itemId,
-        media_source: entity.mediaSource
+        media_source: entity.mediaSource,
+        file_name: entity.fileName,
+        file_path: entity.filePath,
+        progress: entity.progress,
+        status: entity.status
       };
 
       // Use INSERT_OR_REPLACE conflict resolution
@@ -59,35 +63,13 @@ export class DownloadDao {
   }
 
   /**
-   * Delete a download by item ID.
-   * Equivalent to @Query("DELETE FROM Download WHERE item_id LIKE :downloadId")
-   * @param downloadId The download item ID
-   * @returns Number of rows affected
-   */
-  async delete(downloadId: string): Promise<number> {
-    try {
-      const predicates = new relationalStore.RdbPredicates(DownloadEntityHelper.TABLE_NAME);
-      predicates.equalTo('item_id', downloadId);
-
-      const rowsAffected = await this.rdbStore.delete(predicates);
-      hilog.debug(LOG_DOMAIN, LOG_TAG, 'Deleted download, rows affected: %d', rowsAffected);
-      return rowsAffected;
-    } catch (error) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to delete download: %{public}s', JSON.stringify(error));
-      return 0;
-    }
-  }
-
-  /**
-   * Get all downloads ordered by item ID descending.
-   * Equivalent to @Query("SELECT * FROM Download ORDER BY item_id DESC")
-   * Note: Android returns Flow<List<DownloadEntity>>, here we return Promise<DownloadEntity[]>
+   * Query all downloads.
    * @returns Array of DownloadEntity
    */
-  async getAllDownloads(): Promise<DownloadEntity[]> {
+  async queryAll(): Promise<DownloadEntity[]> {
     try {
       const predicates = new relationalStore.RdbPredicates(DownloadEntityHelper.TABLE_NAME);
-      predicates.orderByDesc('item_id');
+      predicates.orderByDesc('id');
 
       const resultSet = await this.rdbStore.query(predicates);
       const downloads: DownloadEntity[] = [];
@@ -104,21 +86,51 @@ export class DownloadDao {
         resultSet.close();
       }
     } catch (error) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to get all downloads: %{public}s', JSON.stringify(error));
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to queryAll downloads: %{public}s', JSON.stringify(error));
       return [];
     }
   }
 
   /**
-   * Get a download by item ID.
-   * Equivalent to @Query("SELECT * FROM Download WHERE item_id LIKE :downloadId")
-   * @param downloadId The download item ID
-   * @returns DownloadEntity or null if not found
+   * Query downloads by status.
+   * @param status The DownloadStatus to filter by
+   * @returns Array of DownloadEntity with the given status
    */
-  async get(downloadId: string): Promise<DownloadEntity | null> {
+  async queryByStatus(status: DownloadStatus): Promise<DownloadEntity[]> {
     try {
       const predicates = new relationalStore.RdbPredicates(DownloadEntityHelper.TABLE_NAME);
-      predicates.equalTo('item_id', downloadId);
+      predicates.equalTo('status', status);
+      predicates.orderByDesc('id');
+
+      const resultSet = await this.rdbStore.query(predicates);
+      const downloads: DownloadEntity[] = [];
+
+      try {
+        while (resultSet.goToNextRow()) {
+          const entity = this.mapResultSetToEntity(resultSet);
+          if (entity !== null) {
+            downloads.push(entity);
+          }
+        }
+        return downloads;
+      } finally {
+        resultSet.close();
+      }
+    } catch (error) {
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to queryByStatus: %{public}s', JSON.stringify(error));
+      return [];
+    }
+  }
+
+  /**
+   * Query a single download by item ID.
+   * @param itemId The Jellyfin item ID
+   * @returns DownloadEntity or null if not found
+   */
+  async queryByItemId(itemId: string): Promise<DownloadEntity | null> {
+    try {
+      const predicates = new relationalStore.RdbPredicates(DownloadEntityHelper.TABLE_NAME);
+      predicates.equalTo('item_id', itemId);
 
       const resultSet = await this.rdbStore.query(predicates);
 
@@ -131,14 +143,77 @@ export class DownloadDao {
         resultSet.close();
       }
     } catch (error) {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to get download: %{public}s', JSON.stringify(error));
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to queryByItemId: %{public}s', JSON.stringify(error));
       return null;
     }
   }
 
   /**
+   * Update progress and status for a download identified by item ID.
+   * @param itemId The Jellyfin item ID
+   * @param progress Progress value 0-100
+   * @param status The new DownloadStatus
+   */
+  async updateProgress(itemId: string, progress: number, status: DownloadStatus): Promise<void> {
+    try {
+      const valueBucket: relationalStore.ValuesBucket = {
+        progress: progress,
+        status: status
+      };
+
+      const predicates = new relationalStore.RdbPredicates(DownloadEntityHelper.TABLE_NAME);
+      predicates.equalTo('item_id', itemId);
+
+      const rowsAffected = await this.rdbStore.update(valueBucket, predicates);
+      hilog.debug(LOG_DOMAIN, LOG_TAG, 'Updated download progress, rows affected: %d', rowsAffected);
+    } catch (error) {
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to updateProgress: %{public}s', JSON.stringify(error));
+    }
+  }
+
+  /**
+   * Delete a download by item ID.
+   * @param itemId The download item ID
+   * @returns true if at least one row was deleted, false otherwise
+   */
+  async delete(itemId: string): Promise<boolean> {
+    try {
+      const predicates = new relationalStore.RdbPredicates(DownloadEntityHelper.TABLE_NAME);
+      predicates.equalTo('item_id', itemId);
+
+      const rowsAffected = await this.rdbStore.delete(predicates);
+      hilog.debug(LOG_DOMAIN, LOG_TAG, 'Deleted download, rows affected: %d', rowsAffected);
+      return rowsAffected > 0;
+    } catch (error) {
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to delete download: %{public}s', JSON.stringify(error));
+      return false;
+    }
+  }
+
+  /**
+   * Get all downloads ordered by item ID descending.
+   * Equivalent to @Query("SELECT * FROM Download ORDER BY item_id DESC")
+   * Note: Android returns Flow<List<DownloadEntity>>, here we return Promise<DownloadEntity[]>
+   * @returns Array of DownloadEntity
+   * @deprecated Use queryAll() instead
+   */
+  async getAllDownloads(): Promise<DownloadEntity[]> {
+    return this.queryAll();
+  }
+
+  /**
+   * Get a download by item ID.
+   * Equivalent to @Query("SELECT * FROM Download WHERE item_id LIKE :downloadId")
+   * @param downloadId The download item ID
+   * @returns DownloadEntity or null if not found
+   * @deprecated Use queryByItemId() instead
+   */
+  async get(downloadId: string): Promise<DownloadEntity | null> {
+    return this.queryByItemId(downloadId);
+  }
+
+  /**
    * Check if a download exists by item ID.
-   * Equivalent to @Query("SELECT EXISTS(SELECT * FROM Download WHERE item_id LIKE :downloadId)")
    * @param downloadId The download item ID
    * @returns true if download exists, false otherwise
    */
@@ -204,10 +279,15 @@ export class DownloadDao {
    */
   private mapResultSetToEntity(resultSet: relationalStore.ResultSet): DownloadEntity | null {
     try {
+      const id = resultSet.getLong(resultSet.getColumnIndex('id'));
       const itemId = resultSet.getString(resultSet.getColumnIndex('item_id'));
       const mediaSource = resultSet.getString(resultSet.getColumnIndex('media_source'));
+      const fileName = resultSet.getString(resultSet.getColumnIndex('file_name'));
+      const filePath = resultSet.getString(resultSet.getColumnIndex('file_path'));
+      const progress = resultSet.getLong(resultSet.getColumnIndex('progress'));
+      const status = resultSet.getString(resultSet.getColumnIndex('status'));
 
-      return DownloadEntityHelper.create(itemId, mediaSource);
+      return DownloadEntityHelper.fromValues(id, itemId, mediaSource, fileName, filePath, progress, status);
     } catch (error) {
       hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to map result set to entity: %{public}s', JSON.stringify(error));
       return null;

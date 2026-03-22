@@ -1,8 +1,10 @@
 /**
- * Jellyfin HarmonyOS - 主页面
+ * Jellyfin HarmonyOS - 主页面（路由中枢）
  * 替代 Android MainActivity
  */
 
+import router from '@ohos.router';
+import window from '@ohos.window';
 import { App } from '../core/di/AppDependency';
 import { ActivityEventType } from '../core/event/ActivityEvent';
 import { AppLog } from '../common/utils/Logger';
@@ -12,136 +14,138 @@ import { ServerState } from './ServerState';
 @Component
 struct MainPage {
   @State serverState: ServerState = ServerState.Pending;
-  @State message: string = 'Loading...';
+  private unsubscribeTokens: Array<() => void> = [];
+  private windowObj: window.Window | null = null;
 
-  private readonly TAG: string = 'MainPage';
-
-  aboutToAppear(): void {
+  aboutToAppear() {
     AppLog.i('MainPage aboutToAppear');
-    this.initializeApp();
     this.subscribeToEvents();
+    this.initializeApp();
   }
 
-  aboutToDisappear(): void {
+  aboutToDisappear() {
     AppLog.i('MainPage aboutToDisappear');
-    App.eventHandler.unsubscribe(ActivityEventType.SELECT_SERVER, () => {});
-    App.eventHandler.unsubscribe(ActivityEventType.EXIT_APP, () => {});
+    this.unsubscribeTokens.forEach(fn => fn());
+    this.unsubscribeTokens = [];
   }
 
   /**
-   * 初始化应用
+   * 订阅事件（6 个）
+   */
+  private subscribeToEvents(): void {
+    // 1. SELECT_SERVER：更改服务器
+    const t1 = App.eventHandler.subscribe(ActivityEventType.SELECT_SERVER, () => {
+      AppLog.i('MainPage: SELECT_SERVER event received');
+      router.replaceUrl({ url: 'setup/ConnectPage' });
+    });
+
+    // 2. LAUNCH_NATIVE_PLAYER：启动原生播放器
+    const t2 = App.eventHandler.subscribe(ActivityEventType.LAUNCH_NATIVE_PLAYER, (event) => {
+      AppLog.i('MainPage: LAUNCH_NATIVE_PLAYER event received');
+      router.pushUrl({
+        url: 'player/ui/PlayerPage',
+        params: {
+          playOptions: typeof event.payload === 'string'
+            ? event.payload
+            : JSON.stringify(event.payload)
+        }
+      });
+    });
+
+    // 3. OPEN_SETTINGS：打开设置
+    const t3 = App.eventHandler.subscribe(ActivityEventType.OPEN_SETTINGS, () => {
+      AppLog.i('MainPage: OPEN_SETTINGS event received');
+      router.pushUrl({ url: 'settings/SettingsPage' });
+    });
+
+    // 4. OPEN_DOWNLOADS：打开下载
+    const t4 = App.eventHandler.subscribe(ActivityEventType.OPEN_DOWNLOADS, () => {
+      AppLog.i('MainPage: OPEN_DOWNLOADS event received');
+      router.pushUrl({ url: 'downloads/DownloadsPage' });
+    });
+
+    // 5. EXIT_APP：退出应用
+    const t5 = App.eventHandler.subscribe(ActivityEventType.EXIT_APP, () => {
+      AppLog.i('MainPage: EXIT_APP event received');
+      try {
+        (getContext(this) as ESObject).terminateSelf();
+      } catch (e) {
+        AppLog.e('MainPage: terminateSelf failed: %{public}s', JSON.stringify(e));
+      }
+    });
+
+    // 6. CHANGE_FULLSCREEN：全屏控制
+    const t6 = App.eventHandler.subscribe(ActivityEventType.CHANGE_FULLSCREEN, (event) => {
+      AppLog.i('MainPage: CHANGE_FULLSCREEN event received');
+      const payload = typeof event.payload === 'string'
+        ? JSON.parse(event.payload) as Record<string, boolean>
+        : event.payload as Record<string, boolean>;
+      const isFullscreen: boolean = (payload as Record<string, boolean>)?.['isFullscreen'] ?? false;
+      this.setFullscreen(isFullscreen);
+    });
+
+    this.unsubscribeTokens = [t1, t2, t3, t4, t5, t6];
+  }
+
+  /**
+   * 初始化应用：检查已保存服务器，路由到对应页面
    */
   private async initializeApp(): Promise<void> {
+    this.serverState = ServerState.Pending;
     try {
-      // App 应该在 EntryAbility 中已经初始化
-      if (!App.isInitialized) {
-        AppLog.e('App not initialized');
-        this.serverState = ServerState.Unset;
-        this.message = 'App initialization failed';
-        return;
-      }
-
-      // 检查是否已登录
-      if (App.isLoggedIn) {
+      const server = await App.apiController.loadSavedServer();
+      if (server) {
         this.serverState = ServerState.Available;
-        this.message = `Connected to ${App.currentServer?.hostname}`;
+        AppLog.i('MainPage: saved server found, navigate to WebViewPage');
+        router.replaceUrl({
+          url: 'webapp/WebViewPage',
+          params: { serverUrl: server.hostname, serverId: server.id }
+        });
       } else {
         this.serverState = ServerState.Unset;
-        this.message = 'Please connect to a server';
+        AppLog.i('MainPage: no saved server, navigate to ConnectPage');
+        router.replaceUrl({ url: 'setup/ConnectPage' });
       }
-
-      AppLog.i('Server state: %{public}s', this.serverState);
-    } catch (error) {
-      AppLog.e('Failed to initialize app: %{public}s', JSON.stringify(error));
+    } catch (err) {
+      AppLog.e('MainPage: initializeApp error: %{public}s', JSON.stringify(err));
       this.serverState = ServerState.Unset;
-      this.message = 'Error: ' + error;
+      router.replaceUrl({ url: 'setup/ConnectPage' });
     }
   }
 
   /**
-   * 订阅事件
+   * 全屏控制
    */
-  private subscribeToEvents(): void {
-    // 订阅服务器选择事件
-    App.eventHandler.subscribe(ActivityEventType.SELECT_SERVER, (event) => {
-      AppLog.i('Received SelectServer event');
-      this.serverState = ServerState.Unset;
-      this.message = 'Select a server to connect';
-    });
-
-    // 订阅退出应用事件
-    App.eventHandler.subscribe(ActivityEventType.EXIT_APP, (event) => {
-      AppLog.i('Received ExitApp event');
-      // TODO: 实现退出逻辑
-    });
+  private async setFullscreen(isFullscreen: boolean): Promise<void> {
+    try {
+      if (!this.windowObj) {
+        this.windowObj = await window.getLastWindow(getContext(this));
+      }
+      if (isFullscreen) {
+        await this.windowObj.setWindowSystemBarEnable([]);
+        await this.windowObj.setPreferredOrientation(window.Orientation.LANDSCAPE);
+      } else {
+        await this.windowObj.setWindowSystemBarEnable(['status', 'navigation']);
+        await this.windowObj.setPreferredOrientation(window.Orientation.PORTRAIT);
+      }
+    } catch (e) {
+      AppLog.e('MainPage: setFullscreen error: %{public}s', JSON.stringify(e));
+    }
   }
 
   build() {
+    // MainPage 本身只做路由，展示加载状态
     Column() {
-      // 顶部标题栏
-      Row() {
-        Text('Jellyfin')
-          .fontSize(24)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(Color.White)
+      if (this.serverState === ServerState.Pending) {
+        LoadingProgress()
+          .width(48)
+          .height(48)
+          .color($r('app.color.primary'))
       }
-      .width('100%')
-      .height(56)
-      .padding({ left: 16, right: 16 })
-      .backgroundColor('#00a4dc')
-
-      // 主内容区
-      Column() {
-        if (this.serverState === ServerState.Pending) {
-          // 加载中
-          LoadingProgress()
-            .width(48)
-            .height(48)
-            .color('#00a4dc')
-
-          Text(this.message)
-            .fontSize(16)
-            .fontColor('#666666')
-            .margin({ top: 16 })
-
-        } else if (this.serverState === ServerState.Unset) {
-          // 未连接服务器
-          Text(this.message)
-            .fontSize(16)
-            .fontColor('#666666')
-            .margin({ bottom: 24 })
-
-          Button('Connect to Server')
-            .width('80%')
-            .height(48)
-            .fontSize(16)
-            .backgroundColor('#00a4dc')
-            .onClick(() => {
-              // TODO: 导航到服务器连接页面
-              AppLog.i('Connect to Server clicked');
-            })
-
-        } else {
-          // 已连接 - 显示 WebView
-          Text(this.message)
-            .fontSize(16)
-            .fontColor('#333333')
-            .margin({ bottom: 16 })
-
-          // TODO: 替换为 WebView 组件
-          Text('WebView will be here')
-            .fontSize(14)
-            .fontColor('#999999')
-        }
-      }
-      .layoutWeight(1)
-      .width('100%')
-      .justifyContent(FlexAlign.Center)
-      .alignItems(HorizontalAlign.Center)
-      .padding(16)
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#f5f5f5')
+    .backgroundColor($r('app.color.background'))
+    .justifyContent(FlexAlign.Center)
   }
 }

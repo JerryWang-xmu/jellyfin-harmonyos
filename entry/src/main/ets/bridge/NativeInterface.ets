@@ -5,10 +5,12 @@
  */
 
 import { BridgeChannel } from './BridgeChannel';
-import { ActivityEventHandler, ActivityEventType, ActivityEvents, MediaSessionInfo, DownloadInfo } from '../core/event/ActivityEvent';
+import { ActivityEventType, ActivityEvents, MediaSessionInfo, DownloadInfo } from '../core/event/ActivityEvent';
+import { ActivityEventHandler } from '../core/event/ActivityEventHandler';
 import { AppPreferences } from '../core/preferences/AppPreferences';
 import { Logger } from '../common/utils/Logger';
 import { Constants } from '../common/constants/Constants';
+import deviceInfo from '@ohos.deviceInfo';
 
 /**
  * 设备信息接口
@@ -128,18 +130,18 @@ export class NativeInterface {
     Logger.d(NativeInterface.TAG, 'updateMediaSession called');
 
     try {
-      const options = JSON.parse(args);
+      const options: ESObject = JSON.parse(args) as ESObject;
 
       const mediaInfo: MediaSessionInfo = {
-        itemId: options.itemId || '',
-        title: options.title || '',
-        artist: options.artist,
-        album: options.album,
-        imageUrl: options.imageUrl,
-        duration: options.duration || 0,
-        position: options.position ?? -1,
-        isPaused: options.isPaused ?? true,
-        canSeek: options.canSeek ?? false
+        itemId: String(options['itemId'] ?? ''),
+        title: String(options['title'] ?? ''),
+        artist: options['artist'] !== undefined ? String(options['artist']) : undefined,
+        album: options['album'] !== undefined ? String(options['album']) : undefined,
+        imageUrl: options['imageUrl'] !== undefined ? String(options['imageUrl']) : undefined,
+        duration: (options['duration'] as number | undefined) ?? 0,
+        position: (options['position'] as number | undefined) ?? -1,
+        isPaused: (options['isPaused'] as boolean | undefined) ?? true,
+        canSeek: (options['canSeek'] as boolean | undefined) ?? false
       };
 
       this.eventHandler.emit(ActivityEvents.updateMediaSession(mediaInfo));
@@ -169,7 +171,7 @@ export class NativeInterface {
    * @param value 音量值 (0-100)
    */
   updateVolumeLevel(value: number): void {
-    Logger.d(NativeInterface.TAG, 'updateVolumeLevel called: %{public}d', value);
+    Logger.d(NativeInterface.TAG, 'updateVolumeLevel called: %{public}s', String(value));
     this.eventHandler.emit(ActivityEvents.updateVolume(value));
   }
 
@@ -182,18 +184,19 @@ export class NativeInterface {
     Logger.d(NativeInterface.TAG, 'downloadFiles called');
 
     try {
-      const files = JSON.parse(args);
+      const files: ESObject[] = JSON.parse(args) as ESObject[];
 
       if (!Array.isArray(files)) {
         Logger.e(NativeInterface.TAG, 'downloadFiles: args is not an array');
         return false;
       }
 
-      for (const file of files) {
+      for (let fi = 0; fi < files.length; fi++) {
+        const fileObj: ESObject = files[fi];
         const downloadInfo: DownloadInfo = {
-          uri: file.url || '',
-          title: file.title || '',
-          filename: file.filename || ''
+          uri: String(fileObj['url'] ?? ''),
+          title: String(fileObj['title'] ?? ''),
+          filename: String(fileObj['filename'] ?? '')
         };
 
         this.eventHandler.emit(ActivityEvents.downloadFile(
@@ -259,7 +262,7 @@ export class NativeInterface {
     Logger.d(NativeInterface.TAG, 'execCast called: action=%{public}s', action);
 
     try {
-      const argsArray = JSON.parse(args);
+      const argsArray = JSON.parse(args) as string[];
       this.eventHandler.emit(ActivityEvents.castMessage(action, argsArray));
     } catch (error) {
       Logger.e(NativeInterface.TAG, 'execCast error: %{public}s', JSON.stringify(error));
@@ -269,14 +272,27 @@ export class NativeInterface {
   // ============ 私有辅助方法 ============
 
   /**
-   * 获取设备 ID
-   * 在 HarmonyOS 中使用设备唯一标识符
+   * 获取设备 ID（持久化存储，基于 UUID v4）
+   * 在 HarmonyOS 中通过 preferences 持久化设备唯一标识符
    */
   private getDeviceId(): string {
     try {
-      // 使用 HarmonyOS API 获取设备 ID
-      // 实际实现应该使用 deviceInfo 或存储的 UUID
-      return `harmonyos_${Date.now()}`;
+      const DEVICE_ID_KEY = 'device_id';
+      const prefs = this.preferences.getRawPreferences();
+      let id = prefs ? (prefs.getSync(DEVICE_ID_KEY, '') as string) : '';
+      if (!id || id.length === 0) {
+        // 生成 UUID v4
+        id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+        if (prefs) {
+          prefs.putSync(DEVICE_ID_KEY, id);
+          prefs.flush();
+        }
+      }
+      return id;
     } catch (error) {
       Logger.e(NativeInterface.TAG, 'Failed to get device ID: %{public}s', JSON.stringify(error));
       return 'unknown_device';
@@ -285,15 +301,14 @@ export class NativeInterface {
 
   /**
    * 获取设备名称
+   * 使用 @ohos.deviceInfo 获取真实设备名称
    */
   private getDeviceName(): string {
     try {
-      // 使用 HarmonyOS API 获取设备名称
-      // 实际实现应该使用 @ohos.deviceInfo
-      return 'HarmonyOS Device';
+      return deviceInfo.marketName || deviceInfo.productModel || 'HarmonyOS Device';
     } catch (error) {
       Logger.e(NativeInterface.TAG, 'Failed to get device name: %{public}s', JSON.stringify(error));
-      return 'Unknown';
+      return 'HarmonyOS Device';
     }
   }
 

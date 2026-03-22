@@ -4,7 +4,8 @@
  * 迁移自 jellyfin-android/bridge/NativePlayer.kt
  */
 
-import { ActivityEventHandler, ActivityEvents, PlayOptions } from '../core/event/ActivityEvent';
+import { ActivityEventHandler } from '../core/event/ActivityEventHandler';
+import { ActivityEvents, PlayOptions } from '../core/event/ActivityEvent';
 import { AppPreferences, VideoPlayerType } from '../core/preferences/AppPreferences';
 import { Logger } from '../common/utils/Logger';
 
@@ -113,7 +114,7 @@ export class NativePlayer {
    * @param ticks 时间刻度 (100纳秒为单位)
    */
   seekTicks(ticks: number): void {
-    Logger.d(NativePlayer.TAG, 'seekTicks called: %{public}d', ticks);
+    Logger.d(NativePlayer.TAG, 'seekTicks called: %{public}s', String(ticks));
     // 转换 ticks 到毫秒 (1 tick = 100ns, 1ms = 10000 ticks)
     const milliseconds = Math.floor(ticks / 10000);
     this.emitPlayerEvent({
@@ -127,7 +128,7 @@ export class NativePlayer {
    * @param ms 毫秒数
    */
   seekMs(ms: number): void {
-    Logger.d(NativePlayer.TAG, 'seekMs called: %{public}d', ms);
+    Logger.d(NativePlayer.TAG, 'seekMs called: %{public}s', String(ms));
     this.emitPlayerEvent({
       type: PlayerEventType.SEEK,
       payload: { milliseconds: ms }
@@ -139,7 +140,7 @@ export class NativePlayer {
    * @param volume 音量值 (0-100)
    */
   setVolume(volume: number): void {
-    Logger.d(NativePlayer.TAG, 'setVolume called: %{public}d', volume);
+    Logger.d(NativePlayer.TAG, 'setVolume called: %{public}s', String(volume));
     this.emitPlayerEvent({
       type: PlayerEventType.SET_VOLUME,
       payload: { volume }
@@ -181,17 +182,18 @@ export class NativePlayer {
    */
   private parsePlayOptions(args: string): PlayOptions | null {
     try {
-      const json = JSON.parse(args);
+      const json: ESObject = JSON.parse(args) as ESObject;
 
-      return {
-        ids: json.ids || [],
-        mediaSourceId: json.mediaSourceId,
-        startIndex: json.startIndex ?? 0,
-        startPosition: json.startPosition,
-        audioStreamIndex: json.audioStreamIndex,
-        subtitleStreamIndex: json.subtitleStreamIndex,
-        playFromDownloads: json.playFromDownloads ?? false
+      const opts: PlayOptions = {
+        ids: (json['ids'] as string[] | undefined) ?? [],
+        mediaSourceId: json['mediaSourceId'] !== undefined ? String(json['mediaSourceId']) : undefined,
+        startIndex: (json['startIndex'] as number | undefined) ?? 0,
+        startPosition: json['startPosition'] !== undefined ? (json['startPosition'] as number) : undefined,
+        audioStreamIndex: json['audioStreamIndex'] !== undefined ? (json['audioStreamIndex'] as number) : undefined,
+        subtitleStreamIndex: json['subtitleStreamIndex'] !== undefined ? (json['subtitleStreamIndex'] as number) : undefined,
+        playFromDownloads: (json['playFromDownloads'] as boolean | undefined) ?? false
       };
+      return opts;
     } catch (error) {
       Logger.e(NativePlayer.TAG, 'Failed to parse play options: %{public}s', JSON.stringify(error));
       return null;

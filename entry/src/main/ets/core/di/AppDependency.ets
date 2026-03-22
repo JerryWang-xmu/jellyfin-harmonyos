@@ -11,6 +11,8 @@ import { AppPreferences, VideoPlayerType, ExternalPlayerPackage } from '../prefe
 import { ActivityEventHandler } from '../event/ActivityEventHandler';
 import { ActivityEvent, ActivityEventType } from '../event/ActivityEvent';
 import { Logger, AppLog } from '../../common/utils/Logger';
+import { JellyfinDatabase, getDatabase } from '../../data/database/JellyfinDatabase';
+import { ApiClientController } from '../../api/ApiClientController';
 
 // ==================== Enums ====================
 
@@ -73,6 +75,8 @@ export class AppDependency {
   private _context: common.UIAbilityContext | null = null;
   private _preferences: AppPreferences | null = null;
   private _eventHandler: ActivityEventHandler | null = null;
+  private _database: JellyfinDatabase | null = null;
+  private _apiController: ApiClientController | null = null;
 
   // Current server and user
   private _currentServer: ServerEntity | null = null;
@@ -127,6 +131,18 @@ export class AppDependency {
       this._eventHandler.initialize();
       AppLog.i('Event handler initialized');
 
+      // Initialize database
+      this._database = await getDatabase(context);
+      AppLog.i('Database initialized');
+
+      // Initialize ApiClientController
+      this._apiController = new ApiClientController(
+        this._preferences,
+        this._database.serverDao,
+        this._database.userDao
+      );
+      AppLog.i('ApiClientController initialized');
+
       this._state = AppState.READY;
       AppLog.i('AppDependency initialized successfully');
     } catch (error) {
@@ -159,6 +175,8 @@ export class AppDependency {
     this._context = null;
     this._preferences = null;
     this._eventHandler = null;
+    this._database = null;
+    this._apiController = null;
     this._currentServer = null;
     this._currentUser = null;
     this._state = AppState.UNINITIALIZED;
@@ -224,6 +242,24 @@ export class AppDependency {
   get eventHandler(): ActivityEventHandler {
     this.ensureInitialized();
     return this._eventHandler!;
+  }
+
+  /**
+   * Get the database instance.
+   * @throws Error if not initialized
+   */
+  get database(): JellyfinDatabase {
+    this.ensureInitialized();
+    return this._database!;
+  }
+
+  /**
+   * Get the ApiClientController instance.
+   * @throws Error if not initialized
+   */
+  get apiController(): ApiClientController {
+    this.ensureInitialized();
+    return this._apiController!;
   }
 
   // ==================== Server/User Management ====================

@@ -1,180 +1,238 @@
-import { AppLog } from '../common/utils/Logger';
+/**
+ * Jellyfin HarmonyOS - 设置页面
+ * 对齐接口契约 Section h SettingsPage 定义
+ */
+
+import router from '@ohos.router';
 import { App } from '../core/di/AppDependency';
+import { ActivityEventType } from '../core/event/ActivityEvent';
 import { Constants } from '../common/constants/Constants';
+import { AppLog } from '../common/utils/Logger';
 
 @Entry
 @Component
 struct SettingsPage {
-  @State serverName: string = 'Not Connected';
-  @State userName: string = 'Not logged in';
-  @State themeMode: number = 0; // 0: System, 1: Light, 2: Dark
-  @State playbackQuality: string = 'Auto';
+  @StorageProp('topRectHeight') topRectHeight: number = 0;
+  @State videoPlayerType: string = 'web';
+  @State exoPlayerAllowSwipeGestures: boolean = true;
+  @State serverName: string = '';
+  @State userName: string = '';
+  @State appVersion: string = Constants.APP_INFO_VERSION;
 
   aboutToAppear() {
+    AppLog.i('SettingsPage.aboutToAppear');
     this.loadSettings();
   }
 
   private async loadSettings(): Promise<void> {
-    // Load current server info from App preferences
-    if (App.isInitialized) {
-      const hostname = App.currentServer?.hostname;
-      if (hostname) {
-        this.serverName = hostname;
-      }
+    try {
+      // 加载服务器信息
+      const server = await App.apiController.loadSavedServer();
+      this.serverName = server?.hostname ?? '未连接';
 
-      // Load current user info
+      // 加载用户信息
       const user = App.currentUser;
       if (user) {
         this.userName = user.userId;
       }
+
+      // 加载播放器偏好
+      this.videoPlayerType = App.preferences.videoPlayerType ?? 'web';
+      this.exoPlayerAllowSwipeGestures = App.preferences.exoPlayerAllowSwipeGestures ?? true;
+
+      AppLog.i('SettingsPage: settings loaded, server=%{public}s', this.serverName);
+    } catch (err) {
+      AppLog.e('SettingsPage: loadSettings error: %{public}s', JSON.stringify(err));
     }
-  }
-
-  build() {
-    Column() {
-      // Header
-      Row() {
-        Text('Settings')
-          .fontSize(24)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#333333')
-      }
-      .width('100%')
-      .padding(16)
-      .backgroundColor('#ffffff')
-
-      List() {
-        // Server Section
-        ListItemGroup({ header: this.SectionHeader('Server') }) {
-          ListItem() {
-            this.SettingItem('Server', this.serverName, () => {
-              // Navigate to server settings
-            })
-          }
-
-          ListItem() {
-            this.SettingItem('User', this.userName, () => {
-              // Navigate to user settings
-            })
-          }
-        }
-
-        // Playback Section
-        ListItemGroup({ header: this.SectionHeader('Playback') }) {
-          ListItem() {
-            this.SettingItem('Default Quality', this.playbackQuality, () => {
-              // Show quality selection dialog
-            })
-          }
-
-          ListItem() {
-            this.SettingItem('Auto-play next episode', 'On', () => {
-              // Toggle auto-play
-            })
-          }
-        }
-
-        // Appearance Section
-        ListItemGroup({ header: this.SectionHeader('Appearance') }) {
-          ListItem() {
-            this.SettingItem('Theme', this.getThemeName(), () => {
-              // Show theme selection dialog
-            })
-          }
-        }
-
-        // About Section
-        ListItemGroup({ header: this.SectionHeader('About') }) {
-          ListItem() {
-            this.SettingItem('Version', Constants.APP_INFO_VERSION, () => {})
-          }
-
-          ListItem() {
-            this.SettingItem('Open Source Licenses', '', () => {
-              // Show licenses
-            })
-          }
-        }
-      }
-      .width('100%')
-      .layoutWeight(1)
-      .backgroundColor('#f5f5f5')
-
-      // Logout Button
-      Row() {
-        Button('Sign Out')
-          .width('85%')
-          .height(50)
-          .backgroundColor('#FF4444')
-          .onClick(() => {
-            this.signOut();
-          })
-      }
-      .width('100%')
-      .padding(16)
-      .backgroundColor('#ffffff')
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#f5f5f5')
   }
 
   @Builder
   SectionHeader(title: string) {
     Text(title)
-      .fontSize(14)
-      .fontColor('#666666')
+      .fontSize(12)
+      .fontColor('#00a4dc')
       .padding({ left: 16, top: 16, bottom: 8 })
+      .width('100%')
   }
 
   @Builder
-  SettingItem(title: string, value: string, onClick: () => void) {
+  SettingItem(title: string, subtitle: string, onClick: () => void) {
     Row() {
-      Column() {
+      Column({ space: 2 }) {
         Text(title)
           .fontSize(16)
-          .fontColor('#333333')
+          .fontColor('#ffffff')
 
-        if (value) {
-          Text(value)
-            .fontSize(14)
-            .fontColor('#666666')
-            .margin({ top: 4 })
+        if (subtitle) {
+          Text(subtitle)
+            .fontSize(12)
+            .fontColor('#b0b0b0')
         }
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
-      Text('>')
-        .fontSize(20)
-        .fontColor('#999999')
+      Image($r('sys.media.ohos_ic_public_arrow_right'))
+        .width(16)
+        .height(16)
+        .fillColor('#666666')
     }
     .width('100%')
-    .padding(16)
-    .backgroundColor('#ffffff')
-    .onClick(onClick)
+    .height(64)
+    .padding({ left: 16, right: 16 })
+    .onClick(() => onClick())
   }
 
-  private getThemeName(): string {
-    switch (this.themeMode) {
-      case 1: return 'Light';
-      case 2: return 'Dark';
-      default: return 'System';
-    }
-  }
+  @Builder
+  NavigationItem(title: string, subtitle: string, onClick: () => void) {
+    Row() {
+      Column({ space: 2 }) {
+        Text(title)
+          .fontSize(16)
+          .fontColor('#ffffff')
 
-  private async signOut(): Promise<void> {
-    try {
-      // Clear user session
-      if (App.isInitialized) {
-        await App.clear();
+        if (subtitle) {
+          Text(subtitle)
+            .fontSize(12)
+            .fontColor('#b0b0b0')
+        }
       }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
 
-      AppLog.i('User signed out');
-      // Navigate to connect page
-    } catch (err) {
-      AppLog.e('Sign out error: %{public}s', JSON.stringify(err));
+      Image($r('sys.media.ohos_ic_public_arrow_right'))
+        .width(16)
+        .height(16)
+        .fillColor('#666666')
     }
+    .width('100%')
+    .height(64)
+    .padding({ left: 16, right: 16 })
+    .onClick(() => onClick())
+  }
+
+  @Builder
+  ToggleItem(title: string, value: boolean, onChange: (v: boolean) => void) {
+    Row() {
+      Text(title)
+        .fontSize(16)
+        .fontColor('#ffffff')
+        .layoutWeight(1)
+
+      Toggle({ type: ToggleType.Switch, isOn: value })
+        .selectedColor('#00a4dc')
+        .onChange((isOn: boolean) => {
+          onChange(isOn);
+        })
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 16, right: 16 })
+  }
+
+  build() {
+    Column() {
+      // 顶部导航栏
+      Row() {
+        Image($r('sys.media.ohos_ic_back'))
+          .width(24)
+          .height(24)
+          .fillColor('#ffffff')
+          .onClick(() => router.back())
+
+        Text('设置')
+          .fontSize(18)
+          .fontColor('#ffffff')
+          .fontWeight(FontWeight.Bold)
+          .margin({ left: 16 })
+
+        Blank()
+      }
+      .width('100%')
+      .height(56 + px2vp(this.topRectHeight))
+      .padding({ left: 16, right: 16, top: px2vp(this.topRectHeight) })
+      .backgroundColor('#0f0f0f')
+
+      Scroll() {
+        Column() {
+          // 服务器信息
+          this.SectionHeader('服务器')
+
+          this.SettingItem('服务器地址', this.serverName, () => {
+            // 只读展示，不跳转
+          })
+
+          this.NavigationItem('更改服务器', '', () => {
+            App.eventHandler.emit({ type: ActivityEventType.SELECT_SERVER, payload: undefined });
+          })
+
+          Divider()
+            .color('#2a2a2a')
+            .margin({ left: 16 })
+
+          // 播放器
+          this.SectionHeader('播放器')
+
+          this.ToggleItem(
+            '允许手势控制（亮度/音量）',
+            this.exoPlayerAllowSwipeGestures,
+            (v: boolean) => {
+              this.exoPlayerAllowSwipeGestures = v;
+              // 通过 rawPreferences 写回，因为 AppPreferences 只暴露 getter
+              App.preferences.getRawPreferences()?.putSync(
+                Constants.PREF_EXOPLAYER_ALLOW_SWIPE_GESTURES, v
+              );
+            }
+          )
+
+          Divider()
+            .color('#2a2a2a')
+            .margin({ left: 16 })
+
+          // 关于
+          this.SectionHeader('关于')
+
+          this.SettingItem('版本', this.appVersion, () => {
+            // 只读展示
+          })
+
+          Divider()
+            .color('#2a2a2a')
+            .margin({ left: 16 })
+
+          // 账户
+          this.SectionHeader('账户')
+
+          Row() {
+            Text('注销')
+              .fontSize(16)
+              .fontColor('#ff4444')
+              .layoutWeight(1)
+          }
+          .width('100%')
+          .height(56)
+          .padding({ left: 16, right: 16 })
+          .onClick(async () => {
+            try {
+              AppLog.i('SettingsPage: sign out');
+              // 清除 access token 并跳回连接页
+              App.apiController.config.accessToken = undefined;
+              await App.clear();
+              router.replaceUrl({ url: 'setup/ConnectPage' });
+            } catch (err) {
+              AppLog.e('SettingsPage: sign out error: %{public}s', JSON.stringify(err));
+            }
+          })
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      }
+      .layoutWeight(1)
+      .width('100%')
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#0f0f0f')
   }
 }
 

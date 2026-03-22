@@ -64,14 +64,21 @@ export interface BridgeProxies {
  * 桥接管理器
  * 负责初始化和管理所有桥接组件
  */
+interface BridgeNamesType {
+  NATIVE_INTERFACE: string;
+  NATIVE_PLAYER: string;
+  EXTERNAL_PLAYER: string;
+  MEDIA_SEGMENTS: string;
+}
+
 export class BridgeManager {
   private static readonly TAG: string = 'BridgeManager';
-  private static readonly BRIDGE_NAMES = {
+  private static readonly BRIDGE_NAMES: BridgeNamesType = {
     NATIVE_INTERFACE: 'NativeInterface',
     NATIVE_PLAYER: 'NativePlayer',
     EXTERNAL_PLAYER: 'ExternalPlayer',
     MEDIA_SEGMENTS: 'MediaSegments'
-  } as const;
+  };
 
   private context: Context;
   private controller: webview.WebviewController;
@@ -129,7 +136,7 @@ export class BridgeManager {
       Logger.i(BridgeManager.TAG, 'BridgeManager initialized successfully');
     } catch (error) {
       Logger.e(BridgeManager.TAG, 'Failed to initialize BridgeManager: %{public}s', JSON.stringify(error));
-      throw error;
+      throw new Error(JSON.stringify(error));
     }
   }
 
@@ -249,7 +256,7 @@ export class BridgeManager {
       Logger.i(BridgeManager.TAG, 'JavaScript proxies registered');
     } catch (error) {
       Logger.e(BridgeManager.TAG, 'Failed to register JavaScript proxies: %{public}s', JSON.stringify(error));
-      throw error;
+      throw new Error(JSON.stringify(error));
     }
   }
 

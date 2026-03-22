@@ -1,9 +1,8 @@
 import request from '@ohos.request';
 import { Logger } from '../common/utils/Logger';
-import { DownloadDao } from '../data/dao/DownloadDao';
 import { DownloadEntity, DownloadStatus, createDownloadEntity } from '../data/entity/DownloadEntity';
-import { ActivityEventHandler } from '../core/event/ActivityEventHandler';
 import { ActivityEventType, createEvent } from '../core/event/ActivityEvent';
+import { App } from '../core/di/AppDependency';
 
 /**
  * Download Service
@@ -11,13 +10,9 @@ import { ActivityEventType, createEvent } from '../core/event/ActivityEvent';
  */
 export class DownloadService {
   private static instance: DownloadService;
-  private downloadDao: DownloadDao;
-  private eventHandler: ActivityEventHandler;
   private activeDownloads: Map<string, request.DownloadTask> = new Map();
 
   private constructor() {
-    this.downloadDao = DownloadDao.getInstance();
-    this.eventHandler = ActivityEventHandler.getInstance();
   }
 
   static getInstance(): DownloadService {
@@ -30,7 +25,7 @@ export class DownloadService {
   async startDownload(itemId: string, url: string, fileName: string, filePath: string): Promise<number> {
     try {
       const downloadEntity = createDownloadEntity(itemId, fileName, filePath);
-      const downloadId = await this.downloadDao.insert(downloadEntity);
+      const downloadId = await App.database.downloadDao.insert(downloadEntity);
 
       const downloadConfig: request.DownloadConfig = {
         url: url,
@@ -45,23 +40,23 @@ export class DownloadService {
 
       downloadTask.on('progress', (receivedSize: number, totalSize: number) => {
         const progress = totalSize > 0 ? Math.floor((receivedSize / totalSize) * 100) : 0;
-        this.updateProgress(downloadId, progress, DownloadStatus.DOWNLOADING);
+        this.updateProgress(itemId, progress, DownloadStatus.DOWNLOADING);
       });
 
       downloadTask.on('complete', () => {
-        this.updateProgress(downloadId, 100, DownloadStatus.COMPLETED);
+        this.updateProgress(itemId, 100, DownloadStatus.COMPLETED);
         this.activeDownloads.delete(itemId);
-        this.eventHandler.emit(createEvent(ActivityEventType.DOWNLOAD_COMPLETE, { itemId }));
+        App.eventHandler.emit(createEvent(ActivityEventType.DOWNLOAD_COMPLETE, { itemId }));
       });
 
       downloadTask.on('fail', (err: number) => {
-        this.updateProgress(downloadId, 0, DownloadStatus.FAILED);
+        this.updateProgress(itemId, 0, DownloadStatus.FAILED);
         this.activeDownloads.delete(itemId);
         Logger.error('Download failed: %{public}d', err);
       });
 
       this.activeDownloads.set(itemId, downloadTask);
-      await this.updateProgress(downloadId, 0, DownloadStatus.DOWNLOADING);
+      await this.updateProgress(itemId, 0, DownloadStatus.DOWNLOADING);
 
       Logger.info('Download started: %{public}s', fileName);
       return downloadId;
@@ -99,19 +94,19 @@ export class DownloadService {
   }
 
   async getAllDownloads(): Promise<DownloadEntity[]> {
-    return await this.downloadDao.queryAll();
+    return App.database.downloadDao.queryAll();
   }
 
   async getPendingDownloads(): Promise<DownloadEntity[]> {
-    return await this.downloadDao.queryByStatus(DownloadStatus.PENDING);
+    return App.database.downloadDao.queryByStatus(DownloadStatus.PENDING);
   }
 
-  async removeDownload(id: number): Promise<boolean> {
-    return await this.downloadDao.delete(id);
+  async removeDownload(itemId: string): Promise<boolean> {
+    return App.database.downloadDao.delete(itemId);
   }
 
-  private async updateProgress(id: number, progress: number, status: DownloadStatus): Promise<void> {
-    await this.downloadDao.updateProgress(id, progress, status);
-    this.eventHandler.emit(createEvent(ActivityEventType.DOWNLOAD_PROGRESS, { id, progress, status }));
+  private async updateProgress(itemId: string, progress: number, status: DownloadStatus): Promise<void> {
+    await App.database.downloadDao.updateProgress(itemId, progress, status);
+    App.eventHandler.emit(createEvent(ActivityEventType.DOWNLOAD_PROGRESS, { itemId, progress, status }));
   }
 }

@@ -3,8 +3,9 @@
     "pages/MainPage",
     "pages/Index",
     "setup/ConnectPage",
-    "settings/SettingsPage",
+    "webapp/WebViewPage",
     "player/ui/PlayerPage",
-    "webapp/WebViewPage"
+    "settings/SettingsPage",
+    "downloads/DownloadsPage"
   ]
 }

@@ -29,6 +29,8 @@ export class AVPlayerAdapter implements IPlayerAdapter {
   private _position: number = 0;
   private _volume: number = 100;
   private _speed: number = 1.0;
+  private _selectedAudioIndex: number = -1;
+  private _selectedSubtitleIndex: number = -1;
 
   constructor() {
     Logger.i(TAG, 'AVPlayerAdapter created');
@@ -74,6 +76,14 @@ export class AVPlayerAdapter implements IPlayerAdapter {
         this.listener.onError(new Error('AVPlayer error'));
       }
     });
+
+    // 视频尺寸变化回调
+    this.avPlayer.on('videoSizeChange', (width: number, height: number) => {
+      Logger.d(TAG, 'Video size changed: %{public}s x %{public}s', String(width), String(height));
+      if (this.listener) {
+        this.listener.onVideoSizeChanged(width, height);
+      }
+    });
   }
 
   private handleStateChange(state: string): void {
@@ -86,12 +96,10 @@ export class AVPlayerAdapter implements IPlayerAdapter {
         break;
       case 'prepared':
         this._state = PlayerState.PREPARED;
-        // 获取时长
-        if (this.avPlayer) {
-          this._duration = this.avPlayer.duration;
-          if (this.listener) {
-            this.listener.onDurationChanged(this._duration);
-          }
+        // 获取时长（单位：毫秒）
+        this._duration = this.avPlayer?.duration ?? 0;
+        if (this.listener) {
+          this.listener.onDurationChanged(this._duration);
         }
         break;
       case 'playing':
@@ -134,8 +142,15 @@ export class AVPlayerAdapter implements IPlayerAdapter {
 
   async setSurface(surfaceId: string): Promise<void> {
     this.surfaceId = surfaceId;
-    // Note: setSurface API may vary by HarmonyOS version
-    Logger.i(TAG, 'AVPlayer surface set: %{public}s', surfaceId);
+    if (this.avPlayer && surfaceId) {
+      try {
+        this.avPlayer.surfaceId = surfaceId;
+        Logger.i(TAG, 'AVPlayer surface set: %{public}s', surfaceId);
+      } catch (e) {
+        // setSurfaceId API 可能因版本而异，忽略错误
+        Logger.w(TAG, 'setSurfaceId not available, surfaceId stored: %{public}s', surfaceId);
+      }
+    }
   }
 
   // ============ 媒体加载 ============
@@ -157,7 +172,11 @@ export class AVPlayerAdapter implements IPlayerAdapter {
 
       // 跳转到起始位置
       if (source.startPositionMs && source.startPositionMs > 0) {
-        this.avPlayer.seek(source.startPositionMs);
+        try {
+          this.avPlayer.seek(source.startPositionMs, media.SeekMode.SEEK_PREV_SYNC);
+        } catch (e) {
+          this.avPlayer.seek(source.startPositionMs);
+        }
       }
 
       Logger.i(TAG, 'Media source prepared successfully');
@@ -196,7 +215,12 @@ export class AVPlayerAdapter implements IPlayerAdapter {
 
   seekTo(positionMs: number): void {
     if (this.avPlayer) {
-      this.avPlayer.seek(positionMs);
+      try {
+        // media.SeekMode.SEEK_PREV_SYNC 跳转到最近关键帧（毫秒单位）
+        this.avPlayer.seek(positionMs, media.SeekMode.SEEK_PREV_SYNC);
+      } catch (e) {
+        this.avPlayer.seek(positionMs);
+      }
       Logger.d(TAG, 'Seek to: %{public}d ms', positionMs.toString());
     }
   }
@@ -230,9 +254,11 @@ export class AVPlayerAdapter implements IPlayerAdapter {
 
   setVolume(percent: number): void {
     this._volume = Math.max(0, Math.min(100, percent));
-    if (this.avPlayer) {
-      // AVPlayer 音量范围是 0-1，使用 setVolume 方法
-      // Note: API 可能因 HarmonyOS 版本而异
+    try {
+      // AVPlayer 音量范围 0.0-1.0，percent 范围 0-100
+      this.avPlayer?.setVolume(this._volume / 100);
+    } catch (e) {
+      // setVolume API 不可用时忽略
     }
     Logger.d(TAG, 'Volume set to: %{public}d%%', this._volume.toString());
   }
@@ -245,7 +271,19 @@ export class AVPlayerAdapter implements IPlayerAdapter {
 
   setPlaybackSpeed(speed: number): void {
     this._speed = speed;
-    // Speed control may not be directly available in all AVPlayer versions
+    const speedMap: Record<number, media.PlaybackSpeed> = {
+      0.75: media.PlaybackSpeed.SPEED_FORWARD_0_75_X,
+      1.0:  media.PlaybackSpeed.SPEED_FORWARD_1_00_X,
+      1.25: media.PlaybackSpeed.SPEED_FORWARD_1_25_X,
+      1.5:  media.PlaybackSpeed.SPEED_FORWARD_1_50_X,
+      2.0:  media.PlaybackSpeed.SPEED_FORWARD_2_00_X,
+    };
+    const mode = speedMap[speed] ?? media.PlaybackSpeed.SPEED_FORWARD_1_00_X;
+    try {
+      this.avPlayer?.setSpeed(mode);
+    } catch (e) {
+      // setSpeed API 不可用时忽略
+    }
     Logger.d(TAG, 'Playback speed set to: %{public}f', speed.toString());
   }
 
@@ -256,7 +294,7 @@ export class AVPlayerAdapter implements IPlayerAdapter {
   // ============ 轨道选择 ============
 
   getTracks(): TrackInfo[] {
-    // TODO: 实现轨道获取
+    // TODO: 实现轨道获取（需要 AVPlayer trackChange 事件支持）
     return [];
   }
 
@@ -269,17 +307,44 @@ export class AVPlayerAdapter implements IPlayerAdapter {
   }
 
   selectAudioTrack(index: number): void {
-    // TODO: 实现音频轨道选择
-    Logger.i(TAG, 'Select audio track: %{public}d', index.toString());
+    try {
+      // HarmonyOS AVPlayer selectTrack API（若平台支持）
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this.avPlayer as ESObject)?.selectTrack(index);
+      this._selectedAudioIndex = index;
+      Logger.i(TAG, 'Selected audio track: %{public}d', index.toString());
+    } catch (e) {
+      // TODO: 若 selectTrack 不可用，可尝试 setMediaMuted 或忽略
+      Logger.w(TAG, 'selectTrack not available for audio track: %{public}d', index.toString());
+    }
   }
 
   selectSubtitleTrack(index: number): void {
-    // TODO: 实现字幕轨道选择
-    Logger.i(TAG, 'Select subtitle track: %{public}d', index.toString());
+    try {
+      // HarmonyOS AVPlayer selectTrack API（若平台支持）
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this.avPlayer as ESObject)?.selectTrack(index);
+      this._selectedSubtitleIndex = index;
+      Logger.i(TAG, 'Selected subtitle track: %{public}d', index.toString());
+    } catch (e) {
+      // TODO: 若 selectTrack 不可用，可尝试 setMediaMuted 或忽略
+      Logger.w(TAG, 'selectTrack not available for subtitle track: %{public}d', index.toString());
+    }
   }
 
   disableSubtitles(): void {
-    Logger.i(TAG, 'Subtitles disabled');
+    try {
+      const idx = this._selectedSubtitleIndex;
+      if (idx >= 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (this.avPlayer as ESObject)?.deselectTrack(idx);
+      }
+      this._selectedSubtitleIndex = -1;
+      Logger.i(TAG, 'Subtitles disabled');
+    } catch (e) {
+      // TODO: 若 deselectTrack 不可用，可尝试 setMediaMuted 或忽略
+      Logger.w(TAG, 'deselectTrack not available, subtitles disable skipped');
+    }
   }
 
   // ============ 事件监听 ============

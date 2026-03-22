@@ -10,13 +10,22 @@ import { Logger } from '../common/utils/Logger';
 import { Constants } from '../common/constants/Constants';
 
 /**
+ * 外部播放器事件常量类型
+ */
+interface ExternalPlayerEventsType {
+  CANCELED: string;
+  ENDED: string;
+  TIME_UPDATE: string;
+}
+
+/**
  * 外部播放器事件常量
  */
-export const ExternalPlayerEvents = {
+export const ExternalPlayerEvents: ExternalPlayerEventsType = {
   CANCELED: 'CANCELED',
   ENDED: 'ENDED',
   TIME_UPDATE: 'TIME_UPDATE'
-} as const;
+};
 
 /**
  * 允许的事件列表
@@ -138,16 +147,17 @@ export class ExternalPlayer {
    */
   private parsePlayOptions(args: string): ExternalPlayOptions | null {
     try {
-      const json = JSON.parse(args);
+      const json: ESObject = JSON.parse(args) as ESObject;
 
-      return {
-        ids: json.ids || [],
-        mediaSourceId: json.mediaSourceId,
-        startIndex: json.startIndex ?? 0,
-        startPosition: json.startPosition,
-        audioStreamIndex: json.audioStreamIndex,
-        subtitleStreamIndex: json.subtitleStreamIndex
+      const opts: ExternalPlayOptions = {
+        ids: (json['ids'] as string[] | undefined) ?? [],
+        mediaSourceId: json['mediaSourceId'] !== undefined ? String(json['mediaSourceId']) : undefined,
+        startIndex: (json['startIndex'] as number | undefined) ?? 0,
+        startPosition: json['startPosition'] !== undefined ? (json['startPosition'] as number) : undefined,
+        audioStreamIndex: json['audioStreamIndex'] !== undefined ? (json['audioStreamIndex'] as number) : undefined,
+        subtitleStreamIndex: json['subtitleStreamIndex'] !== undefined ? (json['subtitleStreamIndex'] as number) : undefined
       };
+      return opts;
     } catch (error) {
       Logger.e(ExternalPlayer.TAG, 'Failed to parse play options: %{public}s', JSON.stringify(error));
       return null;
@@ -217,15 +227,15 @@ export class ExternalPlayer {
     const playerPackage = this.preferences.externalPlayerApp;
 
     Logger.i(ExternalPlayer.TAG, 'External player package: %{public}s', playerPackage);
-    Logger.i(ExternalPlayer.TAG, 'Play info: title=%{public}s, position=%{public}d',
-      source.name, source.startTime);
+    Logger.i(ExternalPlayer.TAG, 'Play info: title=%{public}s, position=%{public}s',
+      source.name, String(source.startTime));
   }
 
   /**
    * 通知事件
    */
   private notifyEvent(event: string, parameters: string = ''): void {
-    if (!ALLOWED_EVENTS.includes(event as typeof ExternalPlayerEvents.CANCELED)) {
+    if (!ALLOWED_EVENTS.includes(event)) {
       Logger.w(ExternalPlayer.TAG, 'Event not allowed: %{public}s', event);
       return;
     }
@@ -263,7 +273,6 @@ export class ExternalPlayer {
         this.handleMPVPlayerResult(resultCode, data);
         break;
       case ExternalPlayerPackage.MX_PLAYER:
-      case ExternalPlayerPackage.MX_PLAYER_PRO:
         this.handleMXPlayerResult(resultCode, data);
         break;
       case ExternalPlayerPackage.VLC:
@@ -285,10 +294,10 @@ export class ExternalPlayer {
     const player = 'MPV Player';
 
     if (resultCode === 0) { // RESULT_OK
-      const position = data.position ?? -1;
+      const position: number = (data['position'] as number | undefined) ?? -1;
 
       if (position > 0) {
-        Logger.d(ExternalPlayer.TAG, 'Playback stopped [player=%{public}s, position=%{public}d]', player, position);
+        Logger.d(ExternalPlayer.TAG, 'Playback stopped [player=%{public}s, position=%{public}s]', player, String(position));
         this.notifyEvent(ExternalPlayerEvents.TIME_UPDATE, String(position));
         this.notifyEvent(ExternalPlayerEvents.ENDED);
       } else if (position === 0) {
@@ -313,17 +322,17 @@ export class ExternalPlayer {
     const player = 'MX Player';
 
     if (resultCode === 0) { // RESULT_OK
-      const endBy = data.end_by;
+      const endBy: string = String(data['end_by'] ?? '');
 
       if (endBy === 'playback_completion') {
         Logger.d(ExternalPlayer.TAG, 'Playback completed [player=%{public}s]', player);
         this.notifyEvent(ExternalPlayerEvents.TIME_UPDATE);
         this.notifyEvent(ExternalPlayerEvents.ENDED);
       } else if (endBy === 'user') {
-        const position = data.position ?? -1;
+        const position: number = (data['position'] as number | undefined) ?? -1;
 
         if (position > 0) {
-          Logger.d(ExternalPlayer.TAG, 'Playback stopped [player=%{public}s, position=%{public}d]', player, position);
+          Logger.d(ExternalPlayer.TAG, 'Playback stopped [player=%{public}s, position=%{public}s]', player, String(position));
           this.notifyEvent(ExternalPlayerEvents.TIME_UPDATE, String(position));
           this.notifyEvent(ExternalPlayerEvents.ENDED);
         } else {
@@ -347,15 +356,15 @@ export class ExternalPlayer {
     const player = 'VLC Player';
 
     if (resultCode === 0) { // RESULT_OK
-      const extraPosition = data.extra_position ?? -1;
-      const extraDuration = data.extra_duration ?? -1;
+      const extraPosition: number = (data['extra_position'] as number | undefined) ?? -1;
+      const extraDuration: number = (data['extra_duration'] as number | undefined) ?? -1;
 
       if (extraDuration === extraPosition && extraPosition > 0) {
         Logger.d(ExternalPlayer.TAG, 'Playback completed [player=%{public}s]', player);
         this.notifyEvent(ExternalPlayerEvents.TIME_UPDATE);
         this.notifyEvent(ExternalPlayerEvents.ENDED);
       } else if (extraPosition > 0) {
-        Logger.d(ExternalPlayer.TAG, 'Playback stopped [player=%{public}s, position=%{public}d]', player, extraPosition);
+        Logger.d(ExternalPlayer.TAG, 'Playback stopped [player=%{public}s, position=%{public}s]', player, String(extraPosition));
         this.notifyEvent(ExternalPlayerEvents.TIME_UPDATE, String(extraPosition));
         this.notifyEvent(ExternalPlayerEvents.ENDED);
       } else {
@@ -375,10 +384,10 @@ export class ExternalPlayer {
     const player = 'mpvKt Player';
 
     if (resultCode === 0) { // RESULT_OK
-      const position = data.position ?? -1;
+      const position: number = (data['position'] as number | undefined) ?? -1;
 
       if (position > 0) {
-        Logger.d(ExternalPlayer.TAG, 'Playback stopped [player=%{public}s, position=%{public}d]', player, position);
+        Logger.d(ExternalPlayer.TAG, 'Playback stopped [player=%{public}s, position=%{public}s]', player, String(position));
         this.notifyEvent(ExternalPlayerEvents.TIME_UPDATE, String(position));
         this.notifyEvent(ExternalPlayerEvents.ENDED);
       } else if (position === 0) {
@@ -399,7 +408,7 @@ export class ExternalPlayer {
    * 处理未知播放器结果
    */
   private handleUnknownPlayerResult(resultCode: number, data: ESObject): void {
-    Logger.d(ExternalPlayer.TAG, 'Unknown player result [resultCode=%{public}d]', resultCode);
+    Logger.d(ExternalPlayer.TAG, 'Unknown player result [resultCode=%{public}s]', String(resultCode));
     this.notifyEvent(ExternalPlayerEvents.CANCELED);
     this.showToast('External player not supported');
   }

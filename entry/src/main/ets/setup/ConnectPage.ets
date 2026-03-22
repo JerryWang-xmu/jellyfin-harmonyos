@@ -1,18 +1,19 @@
 /**
  * 服务器连接页面
  * 迁移自 jellyfin-android/connect/ConnectFragment.kt
+ *
+ * UI 对齐 design/UI/首页.png 及 UI_SPEC.md Section 5.1
  */
 
+import router from '@ohos.router';
 import { AppLog } from '../common/utils/Logger';
-import { ServerEntityHelper } from '../data/entity/ServerEntity';
-import { Constants } from '../common/constants/Constants';
-import { ActivityEventType, ActivityEvents } from '../core/event/ActivityEvent';
-import { ActivityEventHandler } from '../core/event/ActivityEventHandler';
 import { App } from '../core/di/AppDependency';
+import { ConnectionHelper, CheckUrlSuccess, CheckUrlError } from './ConnectionHelper';
 
 @Entry
 @Component
 struct ConnectPage {
+  @StorageProp('topRectHeight') topRectHeight: number = 0;
   @State serverUrl: string = '';
   @State isConnecting: boolean = false;
   @State errorMessage: string = '';
@@ -22,145 +23,246 @@ struct ConnectPage {
     this.loadRecentServers();
   }
 
+  /**
+   * 从数据库加载历史服务器列表
+   */
   private async loadRecentServers(): Promise<void> {
-    // TODO: Load from database when properly initialized
-    this.recentServers = [];
-  }
-
-  build() {
-    Column() {
-      // Header
-      Column() {
-        Text('Jellyfin')
-          .fontSize(32)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#00a4dc')
-          .margin({ bottom: 8 })
-
-        Text('Connect to your media server')
-          .fontSize(16)
-          .fontColor('#666666')
-      }
-      .width('100%')
-      .margin({ top: 60, bottom: 40 })
-
-      // Server URL Input
-      Column() {
-        TextInput({ placeholder: 'Server URL (e.g., http://192.168.1.100:8096)' })
-          .width('100%')
-          .height(50)
-          .onChange((value: string) => {
-            this.serverUrl = value;
-          })
-          .margin({ bottom: 16 })
-
-        if (this.errorMessage) {
-          Text(this.errorMessage)
-            .fontSize(14)
-            .fontColor(Color.Red)
-            .margin({ bottom: 16 })
-        }
-
-        Button(this.isConnecting ? 'Connecting...' : 'Connect')
-          .width('100%')
-          .height(50)
-          .enabled(!this.isConnecting && this.serverUrl.length > 0)
-          .onClick(() => {
-            this.connectToServer();
-          })
-      }
-      .width('85%')
-      .padding(16)
-      .backgroundColor('#ffffff')
-      .borderRadius(12)
-
-      // Recent Servers
-      if (this.recentServers.length > 0) {
-        Column() {
-          Text('Recent Servers')
-            .fontSize(16)
-            .fontColor('#666666')
-            .margin({ top: 32, bottom: 16 })
-
-          ForEach(this.recentServers, (server: string) => {
-            Row() {
-              Text(server)
-                .fontSize(14)
-                .fontColor('#333333')
-            }
-            .width('85%')
-            .height(50)
-            .padding({ left: 16, right: 16 })
-            .backgroundColor('#ffffff')
-            .borderRadius(8)
-            .margin({ bottom: 8 })
-            .onClick(() => {
-              this.serverUrl = server;
-              this.connectToServer();
-            })
-          })
-        }
-        .width('100%')
-      }
-
-      Blank()
+    try {
+      const servers = await App.apiController.loadPreviouslyUsedServers();
+      this.recentServers = servers.map(s => s.hostname);
+    } catch {
+      this.recentServers = [];
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#f5f5f5')
   }
 
+  /**
+   * 连接到服务器
+   * 使用 ConnectionHelper 验证 URL，验证成功后调用 apiController.setupServer 持久化
+   */
   private async connectToServer(): Promise<void> {
     this.isConnecting = true;
     this.errorMessage = '';
 
-    try {
-      let url = this.serverUrl.trim();
-      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'http://' + url;
+    const result = await ConnectionHelper.checkServerUrl(this.serverUrl);
+
+    if (result.type === 'success') {
+      const successResult = result as CheckUrlSuccess;
+      try {
+        const serverId = await App.apiController.setupServer(successResult.url);
+        // 导航到 WebViewPage
+        router.replaceUrl({
+          url: 'webapp/WebViewPage',
+          params: { serverUrl: successResult.url, serverId: serverId }
+        });
+      } catch (err) {
+        this.errorMessage = '保存服务器信息失败';
+        AppLog.e('Setup server error: %{public}s', JSON.stringify(err));
       }
-
-      // Try to connect to server
-      const response = await this.testConnection(url);
-
-      if (response) {
-        // Emit connection event
-        App.eventHandler.emit(
-          ActivityEvents.openUrl(url)
-        );
-
-        AppLog.i('Connected to server: %{public}s', url);
-        // Navigate to main page or login page
-      } else {
-        this.errorMessage = 'Unable to connect to server';
-      }
-    } catch (err) {
-      this.errorMessage = 'Connection failed. Please check the URL.';
-      AppLog.e('Connection error: %{public}s', JSON.stringify(err));
-    } finally {
-      this.isConnecting = false;
+    } else if (result.type === 'error') {
+      const errorResult = result as CheckUrlError;
+      this.errorMessage = errorResult.message;
     }
+
+    this.isConnecting = false;
   }
 
-  private async testConnection(url: string): Promise<ServerInfo | null> {
-    try {
-      // This would normally use http module to make request
-      // For now, return a placeholder
-      AppLog.i('Testing connection to: %{public}s', url);
-      const result: ServerInfo = {
-        ServerName: 'Jellyfin Server',
-        Version: '10.8.0'
-      };
-      return result;
-    } catch (err) {
-      return null;
-    }
-  }
-}
+  /**
+   * Jellyfin Logo 区域：紫蓝渐变三角形图标 + "Jellyfin" 文字
+   */
+  @Builder
+  JellyfinLogo() {
+    Row() {
+      // 三角形图标（使用多边形近似：两个三角叠加形成 Jellyfin logo 造型）
+      // 由于 ArkTS 无法直接绘制任意 SVG，使用 Text + Unicode 或 Canvas 近似
+      // 此处使用品牌色文字配合三角符号还原 logo 视觉
+      Stack() {
+        // 外层大三角（紫色）
+        Polygon({ width: 32, height: 32 })
+          .points([{ x: 16, y: 0 }, { x: 32, y: 28 }, { x: 0, y: 28 }])
+          .fill('#aa5cc3')
+        // 内层小三角（蓝色，形成双三角 logo 效果）
+        Polygon({ width: 20, height: 20 })
+          .points([{ x: 10, y: 10 }, { x: 20, y: 28 }, { x: 0, y: 28 }])
+          .fill('#0086b3')
+          .offset({ x: 6, y: 2 })
+      }
+      .width(32)
+      .height(32)
+      .margin({ right: 10 })
 
-interface ServerInfo {
-  ServerName: string;
-  Version: string;
+      Text('Jellyfin')
+        .fontSize(20)
+        .fontWeight(FontWeight.Medium)
+        .fontColor('#ffffff')
+    }
+    .alignItems(VerticalAlign.Center)
+  }
+
+  /**
+   * 历史服务器列表项
+   */
+  @Builder
+  RecentServerItem(server: string) {
+    Row() {
+      // 地球仪图标（Unicode 替代）
+      Text('\uD83C\uDF10')
+        .fontSize(18)
+        .margin({ right: 12 })
+
+      Text(server)
+        .fontSize(14)
+        .fontColor('#ffffff')
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .width('100%')
+    .height(56)
+    .padding({ left: 16, right: 16 })
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      this.serverUrl = server;
+      this.connectToServer();
+    })
+  }
+
+  build() {
+    Column() {
+      // ===== 顶部导航栏（56vp）=====
+      Row() {
+        // 返回箭头
+        Text('\u2190')
+          .fontSize(24)
+          .fontColor('#ffffff')
+          .width(40)
+          .height(40)
+          .textAlign(TextAlign.Center)
+          .onClick(() => {
+            router.back();
+          })
+
+        // Jellyfin Logo
+        this.JellyfinLogo()
+
+        Blank()
+      }
+      .width('100%')
+      .height(56 + px2vp(this.topRectHeight))
+      .padding({ left: 8, right: 16, top: px2vp(this.topRectHeight) })
+      .alignItems(VerticalAlign.Center)
+
+      // ===== 主内容区 =====
+      Column() {
+        // 顶部间距
+        Blank().height(32)
+
+        // "连接到服务器" 大标题
+        Text('连接到服务器')
+          .fontSize(32)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#ffffff')
+          .width('100%')
+          .textAlign(TextAlign.Start)
+          .margin({ bottom: 16 })
+
+        // "主机" 标签
+        Text('主机')
+          .fontSize(14)
+          .fontColor('#b0b0b0')
+          .width('100%')
+          .textAlign(TextAlign.Start)
+          .margin({ bottom: 8 })
+
+        // 深色输入框
+        TextInput({
+          text: this.serverUrl,
+          placeholder: '192.168.1.100:8096 或 https://myserver.com'
+        })
+          .width('100%')
+          .height(48)
+          .backgroundColor('#1e1e1e')
+          .borderRadius(4)
+          .fontSize(16)
+          .fontColor('#ffffff')
+          .placeholderColor('#888888')
+          .placeholderFont({ size: 16 })
+          .padding({ left: 12, right: 12 })
+          .onChange((value: string) => {
+            this.serverUrl = value;
+          })
+
+        // 错误提示
+        if (this.errorMessage) {
+          Text(this.errorMessage)
+            .fontSize(14)
+            .fontColor('#ff4444')
+            .width('100%')
+            .textAlign(TextAlign.Start)
+            .margin({ top: 8 })
+        }
+
+        // 间距
+        Blank().height(24)
+
+        // "连接" 主按钮（青蓝色）
+        Button(this.isConnecting ? '连接中...' : '连接')
+          .width('100%')
+          .height(48)
+          .borderRadius(4)
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#ffffff')
+          .backgroundColor(this.isConnecting ? '#0085b3' : '#00a4dc')
+          .enabled(!this.isConnecting && this.serverUrl.trim().length > 0)
+          .onClick(() => {
+            this.connectToServer();
+          })
+
+        // "取消" 次要按钮（暗色，有历史服务器时显示）
+        if (this.recentServers.length > 0) {
+          Blank().height(8)
+
+          Button('取消')
+            .width('100%')
+            .height(48)
+            .borderRadius(4)
+            .fontSize(16)
+            .fontColor('#ffffff')
+            .backgroundColor('#2d2d2d')
+            .onClick(() => {
+              router.back();
+            })
+        }
+
+        // ===== 历史服务器区 =====
+        if (this.recentServers.length > 0) {
+          Column() {
+            // "最近使用" 标题
+            Text('最近使用')
+              .fontSize(14)
+              .fontColor('#b0b0b0')
+              .width('100%')
+              .textAlign(TextAlign.Start)
+              .margin({ top: 32, bottom: 8 })
+
+            // 服务器列表
+            ForEach(this.recentServers, (server: string) => {
+              this.RecentServerItem(server)
+            })
+          }
+          .width('100%')
+        }
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16 })
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#0f0f0f')
+    .alignItems(HorizontalAlign.Start)
+  }
 }
 
 export default ConnectPage;
