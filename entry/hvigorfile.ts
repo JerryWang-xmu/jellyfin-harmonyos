@@ -1,4 +1,5 @@
 /*
+ * Jellyfin for HarmonyOS
  * Copyright (C) 2020-2026 Jellyfin Contributors
  * Copyright (C) 2026 WangRuijie
  *
