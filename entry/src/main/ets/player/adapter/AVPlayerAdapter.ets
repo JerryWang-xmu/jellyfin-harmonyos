@@ -192,7 +192,7 @@ export class AVPlayerAdapter implements IPlayerAdapter {
   play(): void {
     const player = this.avPlayer;
     if (player && (this._state === PlayerState.PREPARED || this._state === PlayerState.PAUSED)) {
-      player.play();
+      try { player.play(); } catch (e) { Logger.e(TAG, 'play() error: %{public}s', JSON.stringify(e)); }
       Logger.d(TAG, 'Playback started');
     }
   }
@@ -200,7 +200,7 @@ export class AVPlayerAdapter implements IPlayerAdapter {
   pause(): void {
     const player = this.avPlayer;
     if (player && this._state === PlayerState.PLAYING) {
-      player.pause();
+      try { player.pause(); } catch (e) { Logger.e(TAG, 'pause() error: %{public}s', JSON.stringify(e)); }
       Logger.d(TAG, 'Playback paused');
     }
   }
@@ -208,7 +208,7 @@ export class AVPlayerAdapter implements IPlayerAdapter {
   stop(): void {
     const player = this.avPlayer;
     if (player) {
-      player.stop();
+      try { player.stop(); } catch (e) { Logger.e(TAG, 'stop() error: %{public}s', JSON.stringify(e)); }
       Logger.d(TAG, 'Playback stopped');
     }
   }

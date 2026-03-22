@@ -4,10 +4,10 @@
  */
 
 import webview from '@ohos.web.webview';
-import router from '@ohos.router';
+import { router } from '@kit.ArkUI';
 import window from '@ohos.window';
 import { BridgeManager, BridgeManagerConfig } from '../bridge/BridgeManager';
-import { App } from '../core/di/AppDependency';
+import { App, getContext } from '../core/di/AppDependency';
 import { ActivityEventType, ChangeFullscreenPayload } from '../core/event/ActivityEvent';
 import { AppLog } from '../common/utils/Logger';
 
@@ -36,7 +36,7 @@ struct WebViewPage {
     AppLog.i('WebViewPage.aboutToAppear, url=%{public}s', this.serverUrl);
     if (!this.serverUrl) {
       AppLog.e('WebViewPage: serverUrl is empty, redirect to ConnectPage');
-      router.replaceUrl({ url: 'setup/ConnectPage' });
+      try { router.replaceUrl({ url: 'setup/ConnectPage' }); } catch { /* ignore */ }
       return;
     }
     // 启动加载超时计时（10 秒）
@@ -235,7 +235,7 @@ struct WebViewPage {
   private async handleFullscreenChange(isFullscreen: boolean): Promise<void> {
     try {
       if (!this.windowObj) {
-        this.windowObj = await window.getLastWindow(getContext(this));
+        this.windowObj = await window.getLastWindow(getContext());
       }
       if (isFullscreen) {
         await this.windowObj.setPreferredOrientation(window.Orientation.LANDSCAPE);
@@ -256,7 +256,7 @@ struct WebViewPage {
       AppLog.i('WebViewPage: initializing BridgeManager...');
       const config: BridgeManagerConfig = {
         controller: this.controller,
-        context: getContext(this),
+        context: getContext(),
         eventHandler: App.eventHandler,
         preferences: App.preferences
       };

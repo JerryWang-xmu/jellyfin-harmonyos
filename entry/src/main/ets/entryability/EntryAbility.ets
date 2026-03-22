@@ -6,6 +6,7 @@
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import display from '@ohos.display';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { App } from '../core/di/AppDependency';
 import { Logger, AppLog } from '../common/utils/Logger';
@@ -52,20 +53,22 @@ export default class EntryAbility extends UIAbility {
 
       // 3. 读取安全区高度并写入 AppStorage
       const syncAvoidArea = (win2: window.Window): void => {
+        const density = display.getDefaultDisplaySync().densityPixels;
         const topArea = win2.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
-        AppStorage.setOrCreate('topRectHeight', topArea.topRect.height);
+        AppStorage.setOrCreate('topRectHeight', topArea.topRect.height / density);
 
         const bottomArea = win2.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
-        AppStorage.setOrCreate('bottomRectHeight', bottomArea.bottomRect.height);
+        AppStorage.setOrCreate('bottomRectHeight', bottomArea.bottomRect.height / density);
       };
       syncAvoidArea(win);
 
       // 4. 监听安全区变化（旋转、折叠屏等场景）
       win.on('avoidAreaChange', (data) => {
+        const density = display.getDefaultDisplaySync().densityPixels;
         if (data.type === window.AvoidAreaType.TYPE_SYSTEM) {
-          AppStorage.setOrCreate('topRectHeight', data.area.topRect.height);
+          AppStorage.setOrCreate('topRectHeight', data.area.topRect.height / density);
         } else if (data.type === window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR) {
-          AppStorage.setOrCreate('bottomRectHeight', data.area.bottomRect.height);
+          AppStorage.setOrCreate('bottomRectHeight', data.area.bottomRect.height / density);
         }
       });
     };

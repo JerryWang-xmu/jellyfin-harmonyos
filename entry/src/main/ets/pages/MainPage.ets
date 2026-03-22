@@ -3,9 +3,9 @@
  * 替代 Android MainActivity
  */
 
-import router from '@ohos.router';
+import { router } from '@kit.ArkUI';
 import window from '@ohos.window';
-import { App } from '../core/di/AppDependency';
+import { App, getContext } from '../core/di/AppDependency';
 import { ActivityEventType } from '../core/event/ActivityEvent';
 import { AppLog } from '../common/utils/Logger';
 import { ServerState } from './ServerState';
@@ -68,7 +68,7 @@ struct MainPage {
     const t5 = App.eventHandler.subscribe(ActivityEventType.EXIT_APP, () => {
       AppLog.i('MainPage: EXIT_APP event received');
       try {
-        (getContext(this) as ESObject).terminateSelf();
+        (getContext() as ESObject).terminateSelf();
       } catch (e) {
         AppLog.e('MainPage: terminateSelf failed: %{public}s', JSON.stringify(e));
       }
@@ -109,7 +109,9 @@ struct MainPage {
     } catch (err) {
       AppLog.e('MainPage: initializeApp error: %{public}s', JSON.stringify(err));
       this.serverState = ServerState.Unset;
-      router.replaceUrl({ url: 'setup/ConnectPage' });
+      try {
+        router.replaceUrl({ url: 'setup/ConnectPage' });
+      } catch { /* ignore */ }
     }
   }
 
@@ -119,7 +121,7 @@ struct MainPage {
   private async setFullscreen(isFullscreen: boolean): Promise<void> {
     try {
       if (!this.windowObj) {
-        this.windowObj = await window.getLastWindow(getContext(this));
+        this.windowObj = await window.getLastWindow(getContext());
       }
       if (isFullscreen) {
         await this.windowObj.setWindowSystemBarEnable([]);

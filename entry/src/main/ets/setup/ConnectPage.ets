@@ -5,7 +5,7 @@
  * UI 对齐 design/UI/首页.png 及 UI_SPEC.md Section 5.1
  */
 
-import router from '@ohos.router';
+import { router } from '@kit.ArkUI';
 import { AppLog } from '../common/utils/Logger';
 import { App } from '../core/di/AppDependency';
 import { ConnectionHelper, CheckUrlSuccess, CheckUrlError } from './ConnectionHelper';
@@ -147,8 +147,8 @@ struct ConnectPage {
         Blank()
       }
       .width('100%')
-      .height(56 + px2vp(this.topRectHeight))
-      .padding({ left: 8, right: 16, top: px2vp(this.topRectHeight) })
+      .height(56 + this.topRectHeight)
+      .padding({ left: 8, right: 16, top: this.topRectHeight })
       .alignItems(VerticalAlign.Center)
 
       // ===== 主内容区 =====

@@ -2,7 +2,7 @@
  * Index Page
  * Splash/Loading screen that redirects to appropriate page
  */
-import router from '@ohos.router';
+import { router } from '@kit.ArkUI';
 import { Logger } from '../common/utils/Logger';
 import { JellyfinDatabase } from '../data/database/JellyfinDatabase';
 import { UserDao } from '../data/dao/UserDao';
@@ -24,9 +24,11 @@ struct Index {
     }
 
     // Navigate to main page
-    router.replaceUrl({
-      url: 'pages/MainPage'
-    });
+    try {
+      router.replaceUrl({
+        url: 'pages/MainPage'
+      });
+    } catch { /* ignore */ }
   }
 
   private delay(ms: number): Promise<void> {

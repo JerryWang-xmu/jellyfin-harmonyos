@@ -56,6 +56,8 @@ export class JellyfinApiService {
         throw new Error(`HTTP ${response.responseCode}: GET ${path}`);
       }
       return JSON.parse(response.result as string) as T;
+    } catch (e) {
+      throw new Error(JSON.stringify(e));
     } finally {
       httpRequest.destroy(); // 必须释放，防止内存泄漏
     }
@@ -86,6 +88,8 @@ export class JellyfinApiService {
       }
       if (!response.result || response.result === '') { const emptyObj: Object = new Object(); return emptyObj as T; }
       return JSON.parse(response.result as string) as T;
+    } catch (e) {
+      throw new Error(JSON.stringify(e));
     } finally {
       httpRequest.destroy();
     }
@@ -115,6 +119,8 @@ export class JellyfinApiService {
       }
       if (!response.result || response.result === '') { const emptyObj: Object = new Object(); return emptyObj as T; }
       return JSON.parse(response.result as string) as T;
+    } catch (e) {
+      throw new Error(JSON.stringify(e));
     } finally {
       httpRequest.destroy();
     }

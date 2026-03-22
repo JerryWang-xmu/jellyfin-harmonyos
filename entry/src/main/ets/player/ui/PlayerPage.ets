@@ -3,7 +3,7 @@
  * Batch 4：完整实现 AVPlayer 原生播放
  */
 
-import router from '@ohos.router';
+import { router } from '@kit.ArkUI';
 import window from '@ohos.window';
 import {
   AVPlayerAdapter
@@ -20,7 +20,7 @@ import {
   JellyfinMediaSourceInfo
 } from '../../api/JellyfinApiService';
 import { PlayOptions } from '../../core/event/ActivityEvent';
-import { App } from '../../core/di/AppDependency';
+import { App, getContext } from '../../core/di/AppDependency';
 import { AppLog } from '../../common/utils/Logger';
 
 const TAG: string = 'PlayerPage';
@@ -380,7 +380,7 @@ struct PlayerPage {
 
   private async setupFullscreen(): Promise<void> {
     try {
-      this.windowObj = await window.getLastWindow(getContext(this));
+      this.windowObj = await window.getLastWindow(getContext());
       await this.windowObj.setWindowSystemBarEnable([]);
     } catch { /* ignore */ }
   }

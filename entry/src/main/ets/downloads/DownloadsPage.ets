@@ -3,7 +3,7 @@
  * 展示本地下载列表，支持加载/空/列表三种状态
  */
 
-import router from '@ohos.router';
+import { router } from '@kit.ArkUI';
 import { App } from '../core/di/AppDependency';
 import { DownloadEntity, DownloadStatus } from '../data/entity/DownloadEntity';
 import { AppLog } from '../common/utils/Logger';
@@ -88,8 +88,8 @@ struct DownloadsPage {
         Blank()
       }
       .width('100%')
-      .height(56 + px2vp(this.topRectHeight))
-      .padding({ left: 16, right: 16, top: px2vp(this.topRectHeight) })
+      .height(56 + this.topRectHeight)
+      .padding({ left: 16, right: 16, top: this.topRectHeight })
       .backgroundColor('#0f0f0f')
 
       // 内容区
