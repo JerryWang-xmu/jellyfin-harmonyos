@@ -69,6 +69,10 @@ export class ActivityEventHandler {
   private eventQueue: ActivityEvent[] = [];
   private maxQueueSize: number = 10;
   private isInitialized: boolean = false;
+  // 标记位：防止 emitter.on 回调与 emit() 直接通知造成双重分发。
+  // emit() 通过 emitter.emit() 广播后，同进程 emitter.on 回调会同步触发，
+  // 此时 _emittingInsideEmit 为 true，handleEmitterEvent 跳过本地通知。
+  private _emittingInsideEmit: boolean = false;
 
   private constructor() {
     // Private constructor for singleton
@@ -108,9 +112,16 @@ export class ActivityEventHandler {
 
   /**
    * Handle events from emitter.
+   * 当 _emittingInsideEmit 为 true 时，说明此回调是由同进程的 emit() 触发的
+   * emitter.emit() 同步回调，此时监听者已在 emit() 中被通知过，跳过以避免双重分发。
    */
   private handleEmitterEvent(eventData: emitter.EventData): void {
     try {
+      // 防双重分发：如果正在 emit() 内部，跳过 emitter 回调的本地通知
+      if (this._emittingInsideEmit) {
+        return;
+      }
+
       const rawData = eventData.data;
       if (!rawData) {
         AppLog.w('Received null event data from emitter');
@@ -135,7 +146,9 @@ export class ActivityEventHandler {
 
   /**
    * Emit an activity event.
-   * The event will be sent to all subscribers and broadcasted via emitter.
+   * 使用标记位防止双重分发：emit() 先通过 notifyListeners 直接通知本地监听者，
+   * 然后通过 emitter.emit() 广播给其他组件。由于 emitter.on 回调在同进程中是同步触发的，
+   * 设置 _emittingInsideEmit 标记让 handleEmitterEvent 跳过重复通知。
    */
   emit(event: ActivityEvent): void {
     // Add to queue for buffer overflow handling
@@ -145,26 +158,28 @@ export class ActivityEventHandler {
     }
     this.eventQueue.push(event);
 
-    // Create emitter event data
-    const eventData: emitter.EventData = {
-      data: {
-        type: event.type,
-        payload: JSON.stringify(event.payload ?? {})
-      }
-    };
+    // Notify local listeners directly (synchronous, first delivery)
+    this.notifyListeners(event);
 
-    // Emit to other processes/components
+    // Broadcast via emitter (triggers handleEmitterEvent in same process synchronously)
+    // _emittingInsideEmit 标记防止 handleEmitterEvent 重复通知
+    this._emittingInsideEmit = true;
     try {
+      const eventData: emitter.EventData = {
+        data: {
+          type: event.type,
+          payload: JSON.stringify(event.payload ?? {})
+        }
+      };
       emitter.emit({
         eventId: ActivityEventHandler.EVENT_ID,
         priority: emitter.EventPriority.HIGH
       }, eventData);
     } catch (error) {
       AppLog.et('Failed to emit event via emitter', error as Error);
+    } finally {
+      this._emittingInsideEmit = false;
     }
-
-    // Notify local listeners immediately
-    this.notifyListeners(event);
   }
 
   /**

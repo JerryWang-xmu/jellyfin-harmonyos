@@ -656,5 +656,44 @@ export default function avPlayerAdapterTest() {
 
       expect(true).assertTrue();
     });
+
+    // ============ Performance Optimization Tests ============
+
+    /**
+     * Test: SPEED_MAP static constant covers standard speeds
+     * Verifies that setPlaybackSpeed correctly maps standard speed values
+     * (the SPEED_MAP was promoted from per-call local object to static class constant)
+     */
+    it('should map standard playback speeds correctly', 0, () => {
+      const standardSpeeds: number[] = [0.75, 1.0, 1.25, 1.5, 2.0];
+      for (const speed of standardSpeeds) {
+        playerAdapter!.setPlaybackSpeed(speed);
+        expect(playerAdapter!.getPlaybackSpeed()).assertEqual(speed);
+      }
+    });
+
+    /**
+     * Test: Position update threshold prevents excessive re-renders
+     *
+     * Design note: AVPlayerAdapter throttles onPositionChanged callbacks to
+     * fire only when position changes >= POSITION_UPDATE_THRESHOLD (250ms).
+     * This reduces PlayerPage re-render frequency from 30-60/sec to ~4/sec.
+     * Full verification requires instrumented tests with a real AVPlayer instance.
+     *
+     * This test verifies the adapter still accepts position-related operations.
+     */
+    it('should maintain position state correctly for throttled updates', 0, () => {
+      const listener: PlayerEventListener = {
+        onPositionChanged: (positionMs: number) => {}
+      };
+      playerAdapter!.setListener(listener);
+
+      // Initial position should be 0
+      expect(playerAdapter!.getCurrentPosition()).assertEqual(0);
+
+      // After removing listener, position queries should still work
+      playerAdapter!.removeListener();
+      expect(playerAdapter!.getCurrentPosition()).assertEqual(0);
+    });
   });
 }

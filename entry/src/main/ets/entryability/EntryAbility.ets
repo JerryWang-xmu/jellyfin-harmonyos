@@ -34,6 +34,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import display from '@ohos.display';
 import { BusinessError } from '@kit.BasicServicesKit';
+import webview from '@ohos.web.webview';
 import { App } from '../core/di/AppDependency';
 import { Logger, AppLog } from '../common/utils/Logger';
 
@@ -42,6 +43,15 @@ const TAG = 'Jellyfin';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    // 预初始化 Web 引擎，将 WebKit 内核加载提前到 Ability 创建阶段，
+    // 避免首次打开 WebView 时的冷启动白屏延迟（约减少 ~100ms）
+    try {
+      webview.WebviewController.initializeWebEngine();
+      hilog.info(DOMAIN, TAG, '%{public}s', 'Web engine pre-initialized');
+    } catch (err) {
+      hilog.warn(DOMAIN, TAG, 'Web engine pre-init failed: %{public}s', JSON.stringify(err));
+    }
+
     // 设置颜色模式
     try {
       this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);

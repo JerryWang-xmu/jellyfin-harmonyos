@@ -45,6 +45,18 @@ const TAG: string = 'AVPlayerAdapter';
  * AVPlayer 适配器实现
  */
 export class AVPlayerAdapter implements IPlayerAdapter {
+  // 播放速度映射表：提升为静态常量，避免每次调用 setPlaybackSpeed 重建对象
+  private static readonly SPEED_MAP: Record<number, media.PlaybackSpeed> = {
+    0.75: media.PlaybackSpeed.SPEED_FORWARD_0_75_X,
+    1.0:  media.PlaybackSpeed.SPEED_FORWARD_1_00_X,
+    1.25: media.PlaybackSpeed.SPEED_FORWARD_1_25_X,
+    1.5:  media.PlaybackSpeed.SPEED_FORWARD_1_50_X,
+    2.0:  media.PlaybackSpeed.SPEED_FORWARD_2_00_X,
+  };
+  // 位置更新节流阈值（毫秒）：只有位置变化超过此值时才通知 listener，
+  // 避免 timeUpdate 高频回调（30-60次/秒）触发 UI 组件 re-render
+  private static readonly POSITION_UPDATE_THRESHOLD: number = 250;
+
   private avPlayer: media.AVPlayer | null = null;
   private listener: PlayerEventListener | null = null;
   private surfaceId: string = '';
@@ -57,6 +69,8 @@ export class AVPlayerAdapter implements IPlayerAdapter {
   private _speed: number = 1.0;
   private _selectedAudioIndex: number = -1;
   private _selectedSubtitleIndex: number = -1;
+  // 位置更新节流：记录上次通知的位置，避免高频回调
+  private _lastNotifiedPosition: number = 0;
 
   constructor() {
     Logger.i(TAG, 'AVPlayerAdapter created');
@@ -86,10 +100,11 @@ export class AVPlayerAdapter implements IPlayerAdapter {
       this.handleStateChange(state);
     });
 
-    // 时间更新回调
+    // 时间更新回调（节流：只在位置变化 >= 250ms 时通知 listener）
     this.avPlayer.on('timeUpdate', (time: number) => {
       this._position = time;
-      if (this.listener) {
+      if (this.listener && Math.abs(time - this._lastNotifiedPosition) >= AVPlayerAdapter.POSITION_UPDATE_THRESHOLD) {
+        this._lastNotifiedPosition = time;
         this.listener.onPositionChanged(time);
       }
     });
@@ -297,14 +312,7 @@ export class AVPlayerAdapter implements IPlayerAdapter {
 
   setPlaybackSpeed(speed: number): void {
     this._speed = speed;
-    const speedMap: Record<number, media.PlaybackSpeed> = {
-      0.75: media.PlaybackSpeed.SPEED_FORWARD_0_75_X,
-      1.0:  media.PlaybackSpeed.SPEED_FORWARD_1_00_X,
-      1.25: media.PlaybackSpeed.SPEED_FORWARD_1_25_X,
-      1.5:  media.PlaybackSpeed.SPEED_FORWARD_1_50_X,
-      2.0:  media.PlaybackSpeed.SPEED_FORWARD_2_00_X,
-    };
-    const mode = speedMap[speed] ?? media.PlaybackSpeed.SPEED_FORWARD_1_00_X;
+    const mode = AVPlayerAdapter.SPEED_MAP[speed] ?? media.PlaybackSpeed.SPEED_FORWARD_1_00_X;
     try {
       this.avPlayer?.setSpeed(mode);
     } catch (e) {

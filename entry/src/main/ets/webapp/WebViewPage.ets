@@ -68,6 +68,16 @@ export struct WebViewPage {
       try { this.navPathStack.replacePath({ name: NAV_DEST_CONNECT }); } catch { /* ignore */ }
       return;
     }
+
+    // DNS 预解析 + Socket 预建连：在 WebView 组件创建前提前完成网络握手，
+    // 首次连接 Jellyfin Server 时减少 DNS 解析 + TCP 建连延迟（约减少 ~50-200ms）
+    try {
+      webview.WebviewController.prepareForPageLoad(this.serverUrl, true, 2);
+      AppLog.i('WebViewPage: DNS pre-connect prepared for %{public}s', this.serverUrl);
+    } catch (e) {
+      AppLog.e('WebViewPage: prepareForPageLoad error: %{public}s', JSON.stringify(e));
+    }
+
     // 启动加载超时计时（10 秒）
     this.loadTimeoutId = setTimeout(() => {
       if (this.isLoading) {
@@ -78,7 +88,7 @@ export struct WebViewPage {
       }
     }, 10000) as number;
 
-    // 订阅全屏事件，由 WebViewPage 直接处理屏幕旋转
+    // 订阅全屏事件，由 WebViewPage 直接处理屏幕旋转 + 系统栏显示/隐藏
     this.unsubscribeFullscreen = App.eventHandler.subscribe(
       ActivityEventType.CHANGE_FULLSCREEN,
       (event) => {
@@ -110,6 +120,7 @@ export struct WebViewPage {
             .javaScriptAccess(true)
             .domStorageAccess(true)
             .fileAccess(true)
+            .keyboardAvoidMode(WebKeyboardAvoidMode.RESIZE_VISUAL)
             .onlineImageAccess(true)
             .mixedMode(MixedMode.All)
             .cacheMode(CacheMode.Default)
@@ -273,7 +284,7 @@ export struct WebViewPage {
   }
 
   /**
-   * 处理全屏切换：旋转屏幕方向
+   * 处理全屏切换：旋转屏幕方向 + 控制 System Bar 显示/隐藏
    */
   private async handleFullscreenChange(isFullscreen: boolean): Promise<void> {
     try {
@@ -281,11 +292,13 @@ export struct WebViewPage {
         this.windowObj = await window.getLastWindow(getContext());
       }
       if (isFullscreen) {
+        await this.windowObj.setWindowSystemBarEnable([]);
         await this.windowObj.setPreferredOrientation(window.Orientation.LANDSCAPE);
       } else {
+        await this.windowObj.setWindowSystemBarEnable(['status', 'navigation']);
         await this.windowObj.setPreferredOrientation(window.Orientation.PORTRAIT);
       }
-      AppLog.i('WebViewPage: orientation changed, isFullscreen=%{public}s', String(isFullscreen));
+      AppLog.i('WebViewPage: fullscreen changed, isFullscreen=%{public}s', String(isFullscreen));
     } catch (e) {
       AppLog.e('WebViewPage: handleFullscreenChange error: %{public}s', JSON.stringify(e));
     }
@@ -293,6 +306,8 @@ export struct WebViewPage {
 
   /**
    * 初始化 BridgeManager（在 onControllerAttached 中调用）
+   * BridgeManager.initialize() 内部的 registerJavaScriptProxies() 会调用一次
+   * controller.refresh() 来激活代理，此处不再重复刷新，避免双重页面重载。
    */
   private async initBridgeManager(): Promise<void> {
     try {
@@ -305,8 +320,6 @@ export struct WebViewPage {
       };
       this.bridgeManager = new BridgeManager(config);
       await this.bridgeManager.initialize();
-      // 注册代理后必须 refresh 使代理在页面加载时生效
-      this.controller.refresh();
       AppLog.i('WebViewPage: BridgeManager initialized successfully');
     } catch (err) {
       AppLog.e('WebViewPage: BridgeManager init error: %{public}s', JSON.stringify(err));

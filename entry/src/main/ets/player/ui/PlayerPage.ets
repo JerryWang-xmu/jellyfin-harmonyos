@@ -142,7 +142,10 @@ export struct PlayerPage {
 
   // ===== UI 状态 =====
   @State isPlaying: boolean = false;
-  @State currentPositionMs: number = 0;
+  // displayPositionMs：驱动 UI 显示的播放位置（每 250ms 从 currentPositionMs 同步）。
+  // 与直接将高频 timeUpdate 回调写入 @State 不同，此方案将 re-render 频率从 30-60次/秒
+  // 降至 4次/秒，大幅降低丢帧率。
+  @State displayPositionMs: number = 0;
   @State durationMs: number = 0;
   @State isBuffering: boolean = false;
   @State showControls: boolean = true;
@@ -158,6 +161,12 @@ export struct PlayerPage {
   // ===== 内部状态 =====
   private player: IPlayerAdapter | null = null;
   private apiService: JellyfinApiService | null = null;
+  // currentPositionMs：由 AVPlayerAdapter 的节流 onPositionChanged 回调更新（约 4次/秒）。
+  // 不使用 @State 装饰器以避免高频回调触发整个组件树 re-render。
+  private currentPositionMs: number = 0;
+  // positionDisplayTimer：定期将 currentPositionMs 同步到 @State displayPositionMs，
+  // 控制进度条和时间文本的 UI 更新频率为 4次/秒。
+  private positionDisplayTimer: number = -1;
   private progressTimer: number = -1;
   private controlsTimer: number = -1;
   private currentPlaySessionId: string = '';
@@ -305,12 +314,15 @@ export struct PlayerPage {
           this.isBuffering = false;
           this.durationMs = this.player?.getDuration() ?? this.durationMs;
           this.startProgressTimer();
+          this.startPositionDisplayTimer();
           this.reportPlaybackStart();
         } else if (state === PlayerState.PAUSED) {
           this.isPlaying = false;
           this.stopProgressTimer();
+          this.stopPositionDisplayTimer();
         } else if (state === PlayerState.COMPLETED) {
           this.isPlaying = false;
+          this.stopPositionDisplayTimer();
           this.reportPlaybackStop(false);
           this.handleExit();
         } else if (state === PlayerState.ERROR) {
@@ -318,7 +330,8 @@ export struct PlayerPage {
           this.isBuffering = false;
         }
       },
-      // onPositionChanged
+      // onPositionChanged：仅更新 private 成员（已由 AVPlayerAdapter 节流至 250ms 间隔），
+      // UI 显示由 positionDisplayTimer 定时同步到 @State displayPositionMs
       (pos: number): void => {
         this.currentPositionMs = pos;
       },
@@ -339,6 +352,7 @@ export struct PlayerPage {
       // onCompletion
       (): void => {
         this.isPlaying = false;
+        this.stopPositionDisplayTimer();
         this.reportPlaybackStop(false);
         this.handleExit();
       },
@@ -422,10 +436,32 @@ export struct PlayerPage {
 
   private clearTimers(): void {
     this.stopProgressTimer();
+    this.stopPositionDisplayTimer();
     if (this.controlsTimer !== -1) {
       clearTimeout(this.controlsTimer);
       this.controlsTimer = -1;
     }
+  }
+
+  /**
+   * 启动位置显示定时器：每 250ms 将 private currentPositionMs 同步到
+   * @State displayPositionMs，控制 UI re-render 频率为 4次/秒。
+   * 配合 AVPlayerAdapter 的 250ms 节流，总 UI 更新频率从 30-60次/秒降至 4次/秒。
+   */
+  private startPositionDisplayTimer(): void {
+    if (this.positionDisplayTimer !== -1) return;
+    this.positionDisplayTimer = setInterval(() => {
+      this.displayPositionMs = this.currentPositionMs;
+    }, 250) as number;
+  }
+
+  private stopPositionDisplayTimer(): void {
+    if (this.positionDisplayTimer !== -1) {
+      clearInterval(this.positionDisplayTimer);
+      this.positionDisplayTimer = -1;
+    }
+    // 停止时做一次最终同步，确保 UI 显示最新位置
+    this.displayPositionMs = this.currentPositionMs;
   }
 
   private handleExit(): void {
@@ -475,7 +511,7 @@ export struct PlayerPage {
     Column() {
       // 时间显示
       Row() {
-        Text(this.formatTime(this.currentPositionMs))
+        Text(this.formatTime(this.displayPositionMs))
           .fontSize(12)
           .fontColor('#ffffff')
         Blank()
@@ -489,7 +525,7 @@ export struct PlayerPage {
       // 进度条
       Slider({
         value: this.durationMs > 0
-          ? (this.currentPositionMs / this.durationMs) * 100
+          ? (this.displayPositionMs / this.durationMs) * 100
           : 0,
         min: 0,
         max: 100,

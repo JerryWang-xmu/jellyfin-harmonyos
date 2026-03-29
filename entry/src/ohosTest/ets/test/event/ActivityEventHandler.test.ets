@@ -459,6 +459,45 @@ export default function activityEventHandlerTest() {
       expect(eventHandler!.hasSubscribers(ActivityEventType.OPEN_SETTINGS)).assertFalse();
     });
 
+    // ============ Double-Dispatch Prevention Tests ============
+
+    /**
+     * Test: emit() should notify listener exactly once (not twice)
+     * Regression test: previously emit() called notifyListeners() directly AND
+     * emitter.emit() triggered handleEmitterEvent() which called notifyListeners() again.
+     * The _emittingInsideEmit guard now prevents the second call.
+     */
+    it('should notify listener exactly once per emit', 0, () => {
+      let callCount = 0;
+
+      eventHandler!.initialize();
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        callCount++;
+      });
+
+      eventHandler!.emit(ActivityEvents.openSettings());
+
+      expect(callCount).assertEqual(1);
+    });
+
+    /**
+     * Test: multiple emits should each trigger exactly one callback
+     */
+    it('should trigger exactly one callback per emit when emitting multiple events', 0, () => {
+      let callCount = 0;
+
+      eventHandler!.initialize();
+      eventHandler!.subscribe(ActivityEventType.CHANGE_FULLSCREEN, (event) => {
+        callCount++;
+      });
+
+      eventHandler!.emit(ActivityEvents.changeFullscreen(true));
+      eventHandler!.emit(ActivityEvents.changeFullscreen(false));
+      eventHandler!.emit(ActivityEvents.changeFullscreen(true));
+
+      expect(callCount).assertEqual(3);
+    });
+
     /**
      * Test: Re-subscribe after unsubscribe
      */

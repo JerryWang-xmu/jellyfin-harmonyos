@@ -24,9 +24,8 @@
  * Rewritten in 'ArkTS' with modifications by WangRuijie on 2026-03-22
  */
 
-import window from '@ohos.window';
 import { App, getContext } from '../core/di/AppDependency';
-import { ActivityEventType, ChangeFullscreenPayload } from '../core/event/ActivityEvent';
+import { ActivityEventType } from '../core/event/ActivityEvent';
 import { AppLog } from '../common/utils/Logger';
 import {
   NAV_DEST_CONNECT,
@@ -57,7 +56,6 @@ struct AppRoot {
   @StorageProp('topRectHeight') topRectHeight: number = 0;
   @State isInitializing: boolean = true;
   private unsubscribeTokens: Array<() => void> = [];
-  private windowObj: window.Window | null = null;
 
   aboutToAppear() {
     App.setNavPathStack(this.navPathStack);
@@ -104,14 +102,10 @@ struct AppRoot {
       }
     });
 
-    const t6 = App.eventHandler.subscribe(ActivityEventType.CHANGE_FULLSCREEN, (event) => {
-      AppLog.i('AppRoot: CHANGE_FULLSCREEN event received');
-      const p = event.payload as ChangeFullscreenPayload;
-      const isFullscreen: boolean = p?.isFullscreen ?? false;
-      this.setFullscreen(isFullscreen);
-    });
+    // CHANGE_FULLSCREEN 已由 WebViewPage 独占处理（含屏幕旋转 + System Bar 控制），
+    // AppRoot 不再重复订阅，避免双重处理导致竞争条件。
 
-    this.unsubscribeTokens = [t1, t2, t3, t4, t5, t6];
+    this.unsubscribeTokens = [t1, t2, t3, t4, t5];
   }
 
   private async initializeApp(): Promise<void> {
@@ -134,23 +128,6 @@ struct AppRoot {
       } catch { /* ignore */ }
     } finally {
       this.isInitializing = false;
-    }
-  }
-
-  private async setFullscreen(isFullscreen: boolean): Promise<void> {
-    try {
-      if (!this.windowObj) {
-        this.windowObj = await window.getLastWindow(getContext());
-      }
-      if (isFullscreen) {
-        await this.windowObj.setWindowSystemBarEnable([]);
-        await this.windowObj.setPreferredOrientation(window.Orientation.LANDSCAPE);
-      } else {
-        await this.windowObj.setWindowSystemBarEnable(['status', 'navigation']);
-        await this.windowObj.setPreferredOrientation(window.Orientation.PORTRAIT);
-      }
-    } catch (e) {
-      AppLog.e('AppRoot: setFullscreen error: %{public}s', JSON.stringify(e));
     }
   }
 
