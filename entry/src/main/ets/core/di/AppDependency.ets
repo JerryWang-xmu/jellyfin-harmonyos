@@ -150,21 +150,21 @@ export class AppDependency {
     try {
       AppLog.i('Initializing AppDependency...');
 
-      // Initialize preferences
-      this._preferences = new AppPreferences(context);
-      await this._preferences.initialize();
-      AppLog.i('Preferences initialized');
-
-      // Initialize event handler
+      // Initialize event handler (synchronous, no await needed)
       this._eventHandler = ActivityEventHandler.getInstance();
       this._eventHandler.initialize();
       AppLog.i('Event handler initialized');
 
-      // Initialize database
-      this._database = await getDatabase(context);
-      AppLog.i('Database initialized');
+      // Initialize preferences and database in parallel (independent operations)
+      this._preferences = new AppPreferences(context);
+      const results: (void | JellyfinDatabase)[] = await Promise.all([
+        this._preferences.initialize(),
+        getDatabase(context)
+      ]);
+      this._database = results[1] as JellyfinDatabase;
+      AppLog.i('Preferences and database initialized in parallel');
 
-      // Initialize ApiClientController
+      // Initialize ApiClientController (depends on preferences + database)
       this._apiController = new ApiClientController(
         this._preferences,
         this._database.serverDao,

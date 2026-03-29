@@ -36,6 +36,12 @@
  * - event/ActivityEventHandler.test.ets - Event system tests
  * - preferences/AppPreferences.test.ets - Preferences tests
  * - player/AVPlayerAdapter.test.ets - Player adapter tests
+ * - bridge/NativeInterface.test.ets - NativeInterface device ID caching tests
+ * - bridge/WebappFunctionChannel.test.ets - WebappFunctionChannel native-to-web forwarding tests
+ * - bridge/BridgeChannel.test.ets - BridgeChannel JS bridge queue/batch and serialization tests
+ * - bridge/BridgeManager.test.ets - BridgeManager lifecycle optimization tests
+ * - core/AppDependency.test.ets - AppDependency singleton DI container and parallel initialization tests
+ * - webapp/WebViewPage.test.ets - WebViewPage state management and optimization tests
  */
 
 import { describe, beforeAll, afterAll, it, expect } from '@ohos/hypium';
@@ -49,6 +55,12 @@ import databaseMigrationTest from './data/DatabaseMigration.test';
 import activityEventHandlerTest from './event/ActivityEventHandler.test';
 import appPreferencesTest from './preferences/AppPreferences.test';
 import avPlayerAdapterTest from './player/AVPlayerAdapter.test';
+import nativeInterfaceTest from './bridge/NativeInterface.test';
+import webappFunctionChannelTest from './bridge/WebappFunctionChannel.test';
+import bridgeChannelTest from './bridge/BridgeChannel.test';
+import bridgeManagerTest from './bridge/BridgeManager.test';
+import appDependencyTest from './core/AppDependency.test';
+import webViewPageTest from './webapp/WebViewPage.test';
 
 const LOG_DOMAIN = 0xFF00;
 const LOG_TAG = 'JellyfinTestSuite';
@@ -75,5 +87,11 @@ export default function testSuite() {
     activityEventHandlerTest();
     appPreferencesTest();
     avPlayerAdapterTest();
+    nativeInterfaceTest();
+    webappFunctionChannelTest();
+    bridgeChannelTest();
+    bridgeManagerTest();
+    appDependencyTest();
+    webViewPageTest();
   });
 }

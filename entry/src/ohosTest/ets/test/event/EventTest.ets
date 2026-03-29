@@ -64,14 +64,15 @@ export default function EventTest() {
      */
     it('should_unsubscribe_from_event', () => {
       let callCount = 0;
-      eventHandler.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+      const callback = (event: ActivityEvent) => {
         callCount++;
-      });
+      };
+      eventHandler.subscribe(ActivityEventType.OPEN_SETTINGS, callback);
 
       eventHandler.emit(ActivityEvents.openSettings());
       expect(callCount).assertEqual(1);
 
-      eventHandler.unsubscribe(ActivityEventType.OPEN_SETTINGS);
+      eventHandler.unsubscribe(ActivityEventType.OPEN_SETTINGS, callback);
       eventHandler.emit(ActivityEvents.openSettings());
       expect(callCount).assertEqual(1); // 应该还是 1，因为已取消订阅
     });

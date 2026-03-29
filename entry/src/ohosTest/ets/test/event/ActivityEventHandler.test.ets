@@ -166,11 +166,13 @@ export default function activityEventHandlerTest() {
      * Test: ActivityEvents.removeDownload
      */
     it('should create removeDownload event', 0, () => {
-      const itemId = 'media123';
-      const event = ActivityEvents.removeDownload(itemId);
+      const downloadId = 'media123';
+      const downloadPath = '/downloads/media123.mp4';
+      const event = ActivityEvents.removeDownload(downloadId, downloadPath);
 
       expect(event.type).assertEqual(ActivityEventType.REMOVE_DOWNLOAD);
-      expect(event.payload?.itemId).assertEqual(itemId);
+      expect(event.payload?.downloadId).assertEqual(downloadId);
+      expect(event.payload?.downloadPath).assertEqual(downloadPath);
       expect(event.payload?.force).assertFalse();
     });
 
@@ -178,11 +180,13 @@ export default function activityEventHandlerTest() {
      * Test: ActivityEvents.removeDownload with force
      */
     it('should create removeDownload event with force', 0, () => {
-      const itemId = 'media123';
-      const event = ActivityEvents.removeDownload(itemId, true);
+      const downloadId = 'media123';
+      const downloadPath = '/downloads/media123.mp4';
+      const event = ActivityEvents.removeDownload(downloadId, downloadPath, true);
 
       expect(event.type).assertEqual(ActivityEventType.REMOVE_DOWNLOAD);
-      expect(event.payload?.itemId).assertEqual(itemId);
+      expect(event.payload?.downloadId).assertEqual(downloadId);
+      expect(event.payload?.downloadPath).assertEqual(downloadPath);
       expect(event.payload?.force).assertTrue();
     });
 
@@ -297,30 +301,24 @@ export default function activityEventHandlerTest() {
       expect(event.payload?.volume).assertEqual(volume);
     });
 
-    // ============ ActivityEventHandler Tests ============
+    // ============ Basic emit/on Tests ============
 
     /**
-     * Test: Subscribe to event
+     * Test: Subscribe to event and verify listener is registered
      */
     it('should subscribe to event type', 0, () => {
-      let receivedEvent: ActivityEvent | null = null;
+      eventHandler!.subscribe(ActivityEventType.CHANGE_FULLSCREEN, (event) => {});
 
-      eventHandler!.subscribe(ActivityEventType.CHANGE_FULLSCREEN, (event) => {
-        receivedEvent = event;
-      });
-
-      expect(eventHandler!.hasSubscribers(ActivityEventType.CHANGE_FULLSCREEN)).assertTrue();
+      expect(eventHandler!.hasListeners(ActivityEventType.CHANGE_FULLSCREEN)).assertTrue();
     });
 
     /**
-     * Test: Unsubscribe from event
+     * Test: hasSubscribers alias works (backward compat)
      */
-    it('should unsubscribe from event type', 0, () => {
+    it('should report subscribers via hasSubscribers alias', 0, () => {
       eventHandler!.subscribe(ActivityEventType.CHANGE_FULLSCREEN, (event) => {});
-      expect(eventHandler!.hasSubscribers(ActivityEventType.CHANGE_FULLSCREEN)).assertTrue();
 
-      eventHandler!.unsubscribe(ActivityEventType.CHANGE_FULLSCREEN);
-      expect(eventHandler!.hasSubscribers(ActivityEventType.CHANGE_FULLSCREEN)).assertFalse();
+      expect(eventHandler!.hasSubscribers(ActivityEventType.CHANGE_FULLSCREEN)).assertTrue();
     });
 
     /**
@@ -342,7 +340,7 @@ export default function activityEventHandlerTest() {
     });
 
     /**
-     * Test: Emit event without subscriber
+     * Test: Emit event without subscriber does not throw
      */
     it('should emit event without subscriber without error', 0, () => {
       const event = ActivityEvents.changeFullscreen(true);
@@ -353,32 +351,57 @@ export default function activityEventHandlerTest() {
     });
 
     /**
-     * Test: Multiple subscribers for same event type
-     * Note: Current implementation only keeps the last subscriber
+     * Test: Unsubscribe from event type
      */
-    it('should handle multiple subscribers for same event type', 0, () => {
-      let callCount = 0;
+    it('should unsubscribe from event type', 0, () => {
+      const callback = (event: ActivityEvent) => {};
+      eventHandler!.subscribe(ActivityEventType.CHANGE_FULLSCREEN, callback);
+      expect(eventHandler!.hasListeners(ActivityEventType.CHANGE_FULLSCREEN)).assertTrue();
 
-      // First subscriber
+      eventHandler!.unsubscribe(ActivityEventType.CHANGE_FULLSCREEN, callback);
+      expect(eventHandler!.hasListeners(ActivityEventType.CHANGE_FULLSCREEN)).assertFalse();
+    });
+
+    /**
+     * Test: hasListeners returns false for unsubscribed type
+     */
+    it('should return false for unsubscribed event type', 0, () => {
+      expect(eventHandler!.hasListeners(ActivityEventType.EXIT_APP)).assertFalse();
+    });
+
+    // ============ Multiple Listeners Tests ============
+
+    /**
+     * Test: Multiple subscribers for same event type all receive events
+     */
+    it('should notify all subscribers for same event type', 0, () => {
+      let callCount1 = 0;
+      let callCount2 = 0;
+      let callCount3 = 0;
+
       eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
-        callCount++;
+        callCount1++;
       });
 
-      // Second subscriber (replaces first)
       eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
-        callCount++;
+        callCount2++;
+      });
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        callCount3++;
       });
 
       eventHandler!.emit(ActivityEvents.openSettings());
 
-      // Only last subscriber is called (current implementation behavior)
-      expect(callCount).assertEqual(1);
+      expect(callCount1).assertEqual(1);
+      expect(callCount2).assertEqual(1);
+      expect(callCount3).assertEqual(1);
     });
 
     /**
-     * Test: Subscribe to multiple event types
+     * Test: Subscribe to multiple event types -- only matching type gets called
      */
-    it('should subscribe to multiple event types', 0, () => {
+    it('should subscribe to multiple event types independently', 0, () => {
       let settingsCalled = false;
       let downloadsCalled = false;
 
@@ -397,75 +420,304 @@ export default function activityEventHandlerTest() {
     });
 
     /**
+     * Test: Subscribe returns an unsubscribe function
+     */
+    it('should return unsubscribe function from subscribe', 0, () => {
+      let callCount = 0;
+
+      const unsub = eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        callCount++;
+      });
+
+      eventHandler!.emit(ActivityEvents.openSettings());
+      expect(callCount).assertEqual(1);
+
+      unsub();
+
+      eventHandler!.emit(ActivityEvents.openSettings());
+      expect(callCount).assertEqual(1); // Still 1 after unsubscribe
+    });
+
+    // ============ off / unsubscribe Tests ============
+
+    /**
+     * Test: Re-subscribe after unsubscribe
+     */
+    it('should allow re-subscription after unsubscribe', 0, () => {
+      let callCount = 0;
+
+      const callback = (event: ActivityEvent) => {
+        callCount++;
+      };
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, callback);
+
+      eventHandler!.emit(ActivityEvents.openSettings());
+      expect(callCount).assertEqual(1);
+
+      eventHandler!.unsubscribe(ActivityEventType.OPEN_SETTINGS, callback);
+      eventHandler!.emit(ActivityEvents.openSettings());
+      expect(callCount).assertEqual(1);
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, callback);
+
+      eventHandler!.emit(ActivityEvents.openSettings());
+      expect(callCount).assertEqual(2);
+    });
+
+    /**
+     * Test: Removing one listener does not affect others on same event type
+     */
+    it('should only remove specific listener not others', 0, () => {
+      let callCount1 = 0;
+      let callCount2 = 0;
+
+      const callback1 = (event: ActivityEvent) => {
+        callCount1++;
+      };
+      const callback2 = (event: ActivityEvent) => {
+        callCount2++;
+      };
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, callback1);
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, callback2);
+
+      eventHandler!.emit(ActivityEvents.openSettings());
+      expect(callCount1).assertEqual(1);
+      expect(callCount2).assertEqual(1);
+
+      // Remove only callback1
+      eventHandler!.unsubscribe(ActivityEventType.OPEN_SETTINGS, callback1);
+
+      eventHandler!.emit(ActivityEvents.openSettings());
+      expect(callCount1).assertEqual(1); // Not called again
+      expect(callCount2).assertEqual(2); // Called again
+    });
+
+    // ============ removeAllListeners / clear Tests ============
+
+    /**
      * Test: Clear all subscriptions
      */
     it('should clear all subscriptions', 0, () => {
       eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {});
       eventHandler!.subscribe(ActivityEventType.OPEN_DOWNLOADS, (event) => {});
 
-      expect(eventHandler!.hasSubscribers(ActivityEventType.OPEN_SETTINGS)).assertTrue();
-      expect(eventHandler!.hasSubscribers(ActivityEventType.OPEN_DOWNLOADS)).assertTrue();
+      expect(eventHandler!.hasListeners(ActivityEventType.OPEN_SETTINGS)).assertTrue();
+      expect(eventHandler!.hasListeners(ActivityEventType.OPEN_DOWNLOADS)).assertTrue();
 
       eventHandler!.clear();
 
-      expect(eventHandler!.hasSubscribers(ActivityEventType.OPEN_SETTINGS)).assertFalse();
-      expect(eventHandler!.hasSubscribers(ActivityEventType.OPEN_DOWNLOADS)).assertFalse();
+      expect(eventHandler!.hasListeners(ActivityEventType.OPEN_SETTINGS)).assertFalse();
+      expect(eventHandler!.hasListeners(ActivityEventType.OPEN_DOWNLOADS)).assertFalse();
     });
 
     /**
-     * Test: hasSubscribers returns false for unsubscribed type
+     * Test: Clear removes all listeners so no callbacks fire
      */
-    it('should return false for unsubscribed event type', 0, () => {
-      expect(eventHandler!.hasSubscribers(ActivityEventType.EXIT_APP)).assertFalse();
-    });
+    it('should not trigger any callbacks after clear', 0, () => {
+      let callCount = 0;
 
-    /**
-     * Test: Emit with complex payload
-     */
-    it('should emit event with complex payload', 0, () => {
-      let receivedEvent: ActivityEvent | null = null;
-
-      eventHandler!.subscribe(ActivityEventType.LAUNCH_NATIVE_PLAYER, (event) => {
-        receivedEvent = event;
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        callCount++;
+      });
+      eventHandler!.subscribe(ActivityEventType.SELECT_SERVER, (event) => {
+        callCount++;
       });
 
-      const playOptions: PlayOptions = {
-        ids: ['id1', 'id2', 'id3'],
-        mediaSourceId: 'source1',
-        startIndex: 1,
-        startPosition: 10000,
-        audioStreamIndex: 2,
-        subtitleStreamIndex: 0,
-        playFromDownloads: true
-      };
+      eventHandler!.clear();
 
-      eventHandler!.emit(ActivityEvents.launchNativePlayer(playOptions));
+      eventHandler!.emit(ActivityEvents.openSettings());
+      eventHandler!.emit(ActivityEvents.selectServer());
 
-      expect(receivedEvent).assertNotNull();
-      expect(receivedEvent!.payload?.ids.length).assertEqual(3);
-      expect(receivedEvent!.payload?.mediaSourceId).assertEqual('source1');
-      expect(receivedEvent!.payload?.startPosition).assertEqual(10000);
-      expect(receivedEvent!.payload?.playFromDownloads).assertTrue();
+      expect(callCount).assertEqual(0);
+    });
+
+    // ============ Reentrancy Safety Tests ============
+
+    /**
+     * Test: Emitting another event inside a callback does not cause issues
+     */
+    it('should handle reentrant emit safely', 0, () => {
+      let outerReceived = false;
+      let innerReceived = false;
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        outerReceived = true;
+        // Emit a different event from inside the callback
+        eventHandler!.emit(ActivityEvents.openDownloads());
+      });
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_DOWNLOADS, (event) => {
+        innerReceived = true;
+      });
+
+      eventHandler!.emit(ActivityEvents.openSettings());
+
+      expect(outerReceived).assertTrue();
+      expect(innerReceived).assertTrue();
     });
 
     /**
-     * Test: Destroy event handler
+     * Test: Reentrant emit of same event type does not cause infinite loop
      */
-    it('should destroy event handler', 0, () => {
+    it('should handle reentrant emit of same event type without infinite loop', 0, () => {
+      let callCount = 0;
+      const MAX_EXPECTED = 2; // First call + one reentrant call
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        callCount++;
+        // Only re-emit once to prevent actual infinite loop in test
+        if (callCount < MAX_EXPECTED) {
+          eventHandler!.emit(ActivityEvents.openSettings());
+        }
+      });
+
+      eventHandler!.emit(ActivityEvents.openSettings());
+
+      expect(callCount).assertEqual(MAX_EXPECTED);
+    });
+
+    /**
+     * Test: Listener exception does not affect other listeners
+     */
+    it('should not let one throwing listener affect others', 0, () => {
+      let secondCalled = false;
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        throw new Error('Intentional test error');
+      });
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        secondCalled = true;
+      });
+
+      // Should not throw, and second listener should still be called
+      eventHandler!.emit(ActivityEvents.openSettings());
+
+      expect(secondCalled).assertTrue();
+    });
+
+    // ============ Queue Overflow Tests ============
+
+    /**
+     * Test: Default queue size should be at least 100
+     */
+    it('should support at least 100 queued events by default', 0, () => {
+      const receivedEvents: ActivityEvent[] = [];
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        receivedEvents.push(event);
+      });
+
+      // Emit 100 events -- all should be delivered, none dropped
+      for (let i = 0; i < 100; i++) {
+        eventHandler!.emit(ActivityEvents.openSettings());
+      }
+
+      // All 100 events should have been delivered to the listener
+      expect(receivedEvents.length).assertEqual(100);
+    });
+
+    /**
+     * Test: Queue can be configured via setMaxQueueSize
+     */
+    it('should allow configuring max queue size', 0, () => {
+      eventHandler!.setMaxQueueSize(5);
+
+      // Emit 7 events -- queue should hold at most 5
+      for (let i = 0; i < 7; i++) {
+        eventHandler!.emit(ActivityEvents.openSettings());
+      }
+
+      const queue = eventHandler!.getEventQueue();
+      expect(queue.length).assertEqual(5);
+    });
+
+    /**
+     * Test: High frequency events are not silently lost from listener perspective
+     */
+    it('should deliver all events to listeners regardless of queue size', 0, () => {
+      let deliveryCount = 0;
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        deliveryCount++;
+      });
+
+      // Emit 50 events -- all 50 should be delivered to listeners synchronously
+      for (let i = 0; i < 50; i++) {
+        eventHandler!.emit(ActivityEvents.openSettings());
+      }
+
+      expect(deliveryCount).assertEqual(50);
+    });
+
+    // ============ destroy Tests ============
+
+    /**
+     * Test: Destroy event handler clears all listeners
+     */
+    it('should destroy event handler and clear listeners', 0, () => {
       eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {});
 
       eventHandler!.destroy();
 
-      expect(eventHandler!.hasSubscribers(ActivityEventType.OPEN_SETTINGS)).assertFalse();
+      expect(eventHandler!.hasListeners(ActivityEventType.OPEN_SETTINGS)).assertFalse();
+    });
+
+    /**
+     * Test: No callbacks fire after destroy
+     */
+    it('should not deliver events after destroy', 0, () => {
+      let callCount = 0;
+
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        callCount++;
+      });
+
+      eventHandler!.destroy();
+
+      eventHandler!.emit(ActivityEvents.openSettings());
+
+      expect(callCount).assertEqual(0);
+    });
+
+    /**
+     * Test: Destroy clears the event queue
+     */
+    it('should clear event queue on destroy', 0, () => {
+      eventHandler!.emit(ActivityEvents.openSettings());
+      eventHandler!.emit(ActivityEvents.openSettings());
+
+      eventHandler!.destroy();
+
+      const queue = eventHandler!.getEventQueue();
+      expect(queue.length).assertEqual(0);
+    });
+
+    /**
+     * Test: Can re-initialize after destroy
+     */
+    it('should allow re-initialization after destroy', 0, () => {
+      eventHandler!.initialize();
+      eventHandler!.destroy();
+
+      // Re-initialize should work
+      eventHandler!.initialize();
+
+      let received = false;
+      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+        received = true;
+      });
+
+      eventHandler!.emit(ActivityEvents.openSettings());
+      expect(received).assertTrue();
     });
 
     // ============ Double-Dispatch Prevention Tests ============
 
     /**
      * Test: emit() should notify listener exactly once (not twice)
-     * Regression test: previously emit() called notifyListeners() directly AND
-     * emitter.emit() triggered handleEmitterEvent() which called notifyListeners() again.
-     * The _emittingInsideEmit guard now prevents the second call.
      */
     it('should notify listener exactly once per emit', 0, () => {
       let callCount = 0;
@@ -498,29 +750,88 @@ export default function activityEventHandlerTest() {
       expect(callCount).assertEqual(3);
     });
 
+    // ============ subscribeAll Tests ============
+
     /**
-     * Test: Re-subscribe after unsubscribe
+     * Test: subscribeAll registers callback for all known event types
      */
-    it('should allow re-subscription after unsubscribe', 0, () => {
+    it('should subscribe to all event types via subscribeAll', 0, () => {
+      const receivedTypes: string[] = [];
+
+      eventHandler!.subscribeAll((event) => {
+        receivedTypes.push(event.type);
+      });
+
+      // Emit several different event types
+      eventHandler!.emit(ActivityEvents.openSettings());
+      eventHandler!.emit(ActivityEvents.changeFullscreen(true));
+      eventHandler!.emit(ActivityEvents.exitApp());
+
+      expect(receivedTypes.length).assertEqual(3);
+      expect(receivedTypes.includes(ActivityEventType.OPEN_SETTINGS)).assertTrue();
+      expect(receivedTypes.includes(ActivityEventType.CHANGE_FULLSCREEN)).assertTrue();
+      expect(receivedTypes.includes(ActivityEventType.EXIT_APP)).assertTrue();
+    });
+
+    /**
+     * Test: subscribeAll returns a function that unsubscribes from all types
+     */
+    it('should unsubscribe from all types via returned function', 0, () => {
       let callCount = 0;
 
-      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
+      const unsubAll = eventHandler!.subscribeAll((event) => {
         callCount++;
       });
 
       eventHandler!.emit(ActivityEvents.openSettings());
       expect(callCount).assertEqual(1);
 
-      eventHandler!.unsubscribe(ActivityEventType.OPEN_SETTINGS);
-      eventHandler!.emit(ActivityEvents.openSettings());
-      expect(callCount).assertEqual(1);
+      unsubAll();
 
-      eventHandler!.subscribe(ActivityEventType.OPEN_SETTINGS, (event) => {
-        callCount++;
+      eventHandler!.emit(ActivityEvents.openSettings());
+      eventHandler!.emit(ActivityEvents.exitApp());
+      expect(callCount).assertEqual(1); // No new calls
+    });
+
+    // ============ tryEmit Tests ============
+
+    /**
+     * Test: tryEmit returns true on success
+     */
+    it('should return true from tryEmit on success', 0, () => {
+      const result = eventHandler!.tryEmit(ActivityEvents.openSettings());
+      expect(result).assertTrue();
+    });
+
+    // ============ Event Payload Tests ============
+
+    /**
+     * Test: Emit with complex payload
+     */
+    it('should emit event with complex payload', 0, () => {
+      let receivedEvent: ActivityEvent | null = null;
+
+      eventHandler!.subscribe(ActivityEventType.LAUNCH_NATIVE_PLAYER, (event) => {
+        receivedEvent = event;
       });
 
-      eventHandler!.emit(ActivityEvents.openSettings());
-      expect(callCount).assertEqual(2);
+      const playOptions: PlayOptions = {
+        ids: ['id1', 'id2', 'id3'],
+        mediaSourceId: 'source1',
+        startIndex: 1,
+        startPosition: 10000,
+        audioStreamIndex: 2,
+        subtitleStreamIndex: 0,
+        playFromDownloads: true
+      };
+
+      eventHandler!.emit(ActivityEvents.launchNativePlayer(playOptions));
+
+      expect(receivedEvent).assertNotNull();
+      expect(receivedEvent!.payload?.ids.length).assertEqual(3);
+      expect(receivedEvent!.payload?.mediaSourceId).assertEqual('source1');
+      expect(receivedEvent!.payload?.startPosition).assertEqual(10000);
+      expect(receivedEvent!.payload?.playFromDownloads).assertTrue();
     });
 
     // ============ PlayOptions Interface Tests ============
@@ -604,6 +915,18 @@ export default function activityEventHandlerTest() {
       expect(info.artist).assertUndefined();
       expect(info.album).assertUndefined();
       expect(info.imageUrl).assertUndefined();
+    });
+
+    // ============ Singleton Tests ============
+
+    /**
+     * Test: getInstance returns the same instance
+     */
+    it('should return same singleton instance from getInstance', 0, () => {
+      const instance1 = ActivityEventHandler.getInstance();
+      const instance2 = ActivityEventHandler.getInstance();
+
+      expect(instance1 === instance2).assertTrue();
     });
   });
 }

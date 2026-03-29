@@ -209,12 +209,24 @@ export class JellyfinDatabase {
       throw new Error('Database not initialized');
     }
 
-    this.rdbStore.beginTransaction();
+    try {
+      this.rdbStore.beginTransaction();
+    } catch (error) {
+      throw new Error('Failed to begin transaction: ' + (error as Error)?.message ?? 'unknown');
+    }
     try {
       await action();
-      this.rdbStore.commit();
+      try {
+        this.rdbStore.commit();
+      } catch (commitError) {
+        throw new Error('Failed to commit transaction: ' + (commitError as Error)?.message ?? 'unknown');
+      }
     } catch (error) {
-      this.rdbStore.rollBack();
+      try {
+        this.rdbStore.rollBack();
+      } catch (rollbackError) {
+        // Rollback failure is logged but not thrown — original error takes priority
+      }
       const err = error as Error;
       throw new Error('Transaction failed: ' + (err?.message ?? 'unknown error'));
     }

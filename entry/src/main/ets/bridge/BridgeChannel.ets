@@ -53,6 +53,10 @@ export interface JavaScriptResult {
 /**
  * 桥接通道类
  * 封装 WebView 的 JavaScript 执行功能
+ *
+ * 支持两种调用模式:
+ * 1. 立即执行: callFunction() / runJavaScript() — 立即执行单次 JS 调用
+ * 2. 排队批处理: enqueueFunction() + flushQueue() — 将多个调用合并为一次 runJavaScript 执行
  */
 export class BridgeChannel {
   private static readonly TAG: string = 'BridgeChannel';
@@ -60,6 +64,13 @@ export class BridgeChannel {
   private controller: webview.WebviewController;
   private onJavaScriptError?: (error: Error) => void;
   private initialized: boolean = false;
+
+  // ---- 消息队列 ----
+  private messageQueue: string[] = [];
+  private queueFlushScheduled: boolean = false;
+
+  // ---- 条件化日志 ----
+  private verboseLogging: boolean = false;
 
   constructor(config: BridgeChannelConfig) {
     this.controller = config.controller;
@@ -88,7 +99,7 @@ export class BridgeChannel {
   }
 
   /**
-   * 执行 JavaScript 代码
+   * 执行 JavaScript 代码（立即执行）
    * @param script JavaScript 代码
    * @returns 执行结果
    */
@@ -99,9 +110,13 @@ export class BridgeChannel {
     }
 
     try {
-      Logger.d(BridgeChannel.TAG, 'Running JavaScript: %{public}s', script.substring(0, 100));
+      if (this.verboseLogging) {
+        Logger.d(BridgeChannel.TAG, 'Running JavaScript: %{public}s', script.substring(0, 100));
+      }
       const result = await this.controller.runJavaScript(script);
-      Logger.d(BridgeChannel.TAG, 'JavaScript result: %{public}s', result);
+      if (this.verboseLogging) {
+        Logger.d(BridgeChannel.TAG, 'JavaScript result: %{public}s', result);
+      }
       return { success: true, result };
     } catch (error) {
       const err = error as Error;
@@ -112,7 +127,7 @@ export class BridgeChannel {
   }
 
   /**
-   * 调用全局函数
+   * 调用全局函数（立即执行）
    * @param functionName 函数名 (如 "window.NativeShell.notifyEvent")
    * @param args 参数列表
    */
@@ -120,6 +135,84 @@ export class BridgeChannel {
     const argsStr = args.map(arg => this.serializeArgument(arg)).join(', ');
     const script = `${functionName}(${argsStr})`;
     return this.runJavaScript(script);
+  }
+
+  /**
+   * 将函数调用加入队列（延迟执行，等待 flushQueue 合并）
+   * @param functionName 函数名
+   * @param args 参数列表
+   */
+  enqueueFunction(functionName: string, ...args: (string | number | boolean | object | null)[]): void {
+    const argsStr = args.map(arg => this.serializeArgument(arg)).join(', ');
+    const script = `${functionName}(${argsStr})`;
+    this.messageQueue.push(script);
+
+    if (!this.queueFlushScheduled) {
+      this.queueFlushScheduled = true;
+    }
+  }
+
+  /**
+   * 刷新队列：将所有排队的 JS 调用合并为一次 runJavaScript 执行
+   * @returns 合并执行的结果
+   */
+  async flushQueue(): Promise<JavaScriptResult> {
+    this.queueFlushScheduled = false;
+
+    if (this.messageQueue.length === 0) {
+      return { success: true };
+    }
+
+    if (!this.initialized) {
+      Logger.w(BridgeChannel.TAG, 'BridgeChannel not initialized, flushing skipped');
+      this.messageQueue = [];
+      return { success: false, error: 'BridgeChannel not initialized' };
+    }
+
+    // 将所有脚本用分号连接成一个合并脚本
+    const mergedScript = this.messageQueue.join(';');
+    const count = this.messageQueue.length;
+    this.messageQueue = [];
+
+    try {
+      if (this.verboseLogging) {
+        Logger.d(BridgeChannel.TAG, 'Flushing %{public}d queued JS calls', String(count));
+        Logger.d(BridgeChannel.TAG, 'Running JavaScript (batch): %{public}s', mergedScript.substring(0, 200));
+      }
+      const result = await this.controller.runJavaScript(mergedScript);
+      if (this.verboseLogging) {
+        Logger.d(BridgeChannel.TAG, 'Batch JavaScript result: %{public}s', result);
+      }
+      return { success: true, result };
+    } catch (error) {
+      const err = error as Error;
+      Logger.e(BridgeChannel.TAG, 'Batch JavaScript execution failed: %{public}s', err.message);
+      this.onJavaScriptError?.(err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * 获取当前队列中的调用数量
+   */
+  getQueueSize(): number {
+    return this.messageQueue.length;
+  }
+
+  /**
+   * 设置是否启用详细日志
+   * @param enabled true 启用 "Running JavaScript: ..." 日志; false 只保留错误日志
+   */
+  setVerboseLogging(enabled: boolean): void {
+    this.verboseLogging = enabled;
+    Logger.i(BridgeChannel.TAG, 'Verbose logging %{public}s', enabled ? 'enabled' : 'disabled');
+  }
+
+  /**
+   * 查询当前详细日志状态
+   */
+  isVerboseLogging(): boolean {
+    return this.verboseLogging;
   }
 
   /**
@@ -191,6 +284,8 @@ export class BridgeChannel {
    */
   destroy(): void {
     this.initialized = false;
+    this.messageQueue = [];
+    this.queueFlushScheduled = false;
     Logger.i(BridgeChannel.TAG, 'BridgeChannel destroyed');
   }
 }

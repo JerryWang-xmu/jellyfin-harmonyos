@@ -28,12 +28,15 @@
  * Jellyfin HarmonyOS - ActivityEventHandler
  * Migrated from jellyfin-android/events/ActivityEventHandler.kt
  *
- * Handles activity events from the web app using HarmonyOS emitter.
+ * Pure in-process event bus using Map<string, Set<Function>>.
+ * Replaces the previous @ohos.events.emitter-based implementation to remove
+ * the double-dispatch complexity (no more _emittingInsideEmit flag).
+ * All communication is within the same process, so a simple listener map
+ * is sufficient and more performant.
  */
 
-import emitter from '@ohos.events.emitter';
 import { ActivityEvent, ActivityEventType } from './ActivityEvent';
-import { Logger, AppLog } from '../../common/utils/Logger';
+import { AppLog } from '../../common/utils/Logger';
 
 // ==================== Types ====================
 
@@ -44,38 +47,46 @@ export type ActivityEventCallback = (event: ActivityEvent) => void;
 
 /**
  * Event handler map type.
+ * Maps event type strings to a set of callback functions.
+ * Using Set ensures duplicate subscriptions are ignored.
  */
-type EventListenerMap = Map<ActivityEventType, Set<ActivityEventCallback>>;
+type EventListenerMap = Map<string, Set<ActivityEventCallback>>;
 
-/**
- * Internal event data structure for emitter.
- */
-interface EmitterEventData {
-  type: string;
-  payload: string;
-}
+// ==================== Constants ====================
+
+/** Default maximum event queue size. */
+const DEFAULT_MAX_QUEUE_SIZE: number = 100;
 
 // ==================== ActivityEventHandler ====================
 
 /**
  * ActivityEventHandler manages the emission and subscription of activity events.
- * Uses HarmonyOS emitter for cross-component communication.
+ *
+ * Pure in-process event bus. No dependency on @ohos.events.emitter --
+ * all listeners are invoked synchronously during emit(), eliminating the
+ * double-dispatch problem that previously required the _emittingInsideEmit flag.
  */
 export class ActivityEventHandler {
-  private static readonly EVENT_ID: number = 1001;
   private static instance: ActivityEventHandler | null = null;
 
+  /** Registered listeners, keyed by event type string. */
   private listeners: EventListenerMap = new Map();
-  private eventQueue: ActivityEvent[] = [];
-  private maxQueueSize: number = 10;
-  private isInitialized: boolean = false;
-  // 标记位：防止 emitter.on 回调与 emit() 直接通知造成双重分发。
-  // emit() 通过 emitter.emit() 广播后，同进程 emitter.on 回调会同步触发，
-  // 此时 _emittingInsideEmit 为 true，handleEmitterEvent 跳过本地通知。
-  private _emittingInsideEmit: boolean = false;
 
-  private constructor() {
-    // Private constructor for singleton
+  /** Bounded event queue for diagnostic / replay purposes. */
+  private eventQueue: ActivityEvent[] = [];
+
+  /** Maximum number of events retained in the queue. */
+  private maxQueueSize: number = DEFAULT_MAX_QUEUE_SIZE;
+
+  /** Whether initialize() has been called. Kept for API compatibility. */
+  private isInitialized: boolean = false;
+
+  /**
+   * Constructor -- public so that unit tests can create fresh instances.
+   * Production code should prefer ActivityEventHandler.getInstance().
+   */
+  constructor() {
+    // Empty -- state is initialized at the field level.
   }
 
   /**
@@ -89,97 +100,38 @@ export class ActivityEventHandler {
   }
 
   /**
-   * Initialize the event handler and register with emitter.
+   * Initialize the event handler.
+   *
+   * In this pure in-process implementation there is no external emitter to
+   * register with, so this method only marks the handler as initialised.
+   * It is kept for backward compatibility with call-sites that call initialize().
    */
   initialize(): void {
     if (this.isInitialized) {
       return;
     }
-
-    this.registerEmitter();
     this.isInitialized = true;
     AppLog.i('ActivityEventHandler initialized');
   }
 
   /**
-   * Register with HarmonyOS emitter to receive events.
-   */
-  private registerEmitter(): void {
-    emitter.on({ eventId: ActivityEventHandler.EVENT_ID }, (eventData) => {
-      this.handleEmitterEvent(eventData);
-    });
-  }
-
-  /**
-   * Handle events from emitter.
-   * 当 _emittingInsideEmit 为 true 时，说明此回调是由同进程的 emit() 触发的
-   * emitter.emit() 同步回调，此时监听者已在 emit() 中被通知过，跳过以避免双重分发。
-   */
-  private handleEmitterEvent(eventData: emitter.EventData): void {
-    try {
-      // 防双重分发：如果正在 emit() 内部，跳过 emitter 回调的本地通知
-      if (this._emittingInsideEmit) {
-        return;
-      }
-
-      const rawData = eventData.data;
-      if (!rawData) {
-        AppLog.w('Received null event data from emitter');
-        return;
-      }
-      const data = rawData as EmitterEventData;
-      if (!data.type) {
-        AppLog.w('Received invalid event data from emitter');
-        return;
-      }
-
-      const event: ActivityEvent = {
-        type: data.type as ActivityEventType,
-        payload: data.payload ? JSON.parse(data.payload) : undefined
-      };
-
-      this.notifyListeners(event);
-    } catch (error) {
-      AppLog.et('Failed to handle emitter event', error as Error);
-    }
-  }
-
-  /**
    * Emit an activity event.
-   * 使用标记位防止双重分发：emit() 先通过 notifyListeners 直接通知本地监听者，
-   * 然后通过 emitter.emit() 广播给其他组件。由于 emitter.on 回调在同进程中是同步触发的，
-   * 设置 _emittingInsideEmit 标记让 handleEmitterEvent 跳过重复通知。
+   *
+   * 1. Enqueue the event (dropping the oldest if the queue is full).
+   * 2. Notify every registered listener for this event type synchronously.
+   *    Each listener is invoked in its own try/catch so that one failing
+   *    listener cannot prevent others from receiving the event.
    */
   emit(event: ActivityEvent): void {
-    // Add to queue for buffer overflow handling
+    // Enqueue with overflow handling
     if (this.eventQueue.length >= this.maxQueueSize) {
       const dropped = this.eventQueue.shift();
       AppLog.w('Event queue overflow, dropping oldest event: ' + (dropped?.type ?? 'unknown'));
     }
     this.eventQueue.push(event);
 
-    // Notify local listeners directly (synchronous, first delivery)
+    // Notify listeners directly -- no external emitter, no double-dispatch.
     this.notifyListeners(event);
-
-    // Broadcast via emitter (triggers handleEmitterEvent in same process synchronously)
-    // _emittingInsideEmit 标记防止 handleEmitterEvent 重复通知
-    this._emittingInsideEmit = true;
-    try {
-      const eventData: emitter.EventData = {
-        data: {
-          type: event.type,
-          payload: JSON.stringify(event.payload ?? {})
-        }
-      };
-      emitter.emit({
-        eventId: ActivityEventHandler.EVENT_ID,
-        priority: emitter.EventPriority.HIGH
-      }, eventData);
-    } catch (error) {
-      AppLog.et('Failed to emit event via emitter', error as Error);
-    } finally {
-      this._emittingInsideEmit = false;
-    }
   }
 
   /**
@@ -198,17 +150,26 @@ export class ActivityEventHandler {
 
   /**
    * Notify all registered listeners for an event type.
+   *
+   * Iterates over a snapshot of the listener set so that mutations
+   * (subscribe / unsubscribe) during iteration do not cause issues.
+   * Each callback is wrapped in try/catch to isolate failures.
    */
   private notifyListeners(event: ActivityEvent): void {
     const callbacks = this.listeners.get(event.type);
-    if (callbacks) {
-      callbacks.forEach(callback => {
-        try {
-          callback(event);
-        } catch (error) {
-          AppLog.et('Error in event listener for ' + event.type, error as Error);
-        }
-      });
+    if (!callbacks) {
+      return;
+    }
+
+    // Iterate over an array snapshot so that reentrant subscribe/unsubscribe
+    // during iteration is safe.
+    const snapshot = Array.from(callbacks);
+    for (const callback of snapshot) {
+      try {
+        callback(event);
+      } catch (error) {
+        AppLog.et('Error in event listener for ' + event.type, error as Error);
+      }
     }
   }
 
@@ -269,7 +230,7 @@ export class ActivityEventHandler {
   }
 
   /**
-   * Unsubscribe from events of a specific type.
+   * Unsubscribe a specific callback from events of a specific type.
    */
   unsubscribe(type: ActivityEventType, callback: ActivityEventCallback): void {
     const callbacks = this.listeners.get(type);
@@ -290,7 +251,15 @@ export class ActivityEventHandler {
   }
 
   /**
-   * Clear all listeners.
+   * Alias for hasListeners -- backward compatibility.
+   * Some existing call-sites and tests use hasSubscribers.
+   */
+  hasSubscribers(type: ActivityEventType): boolean {
+    return this.hasListeners(type);
+  }
+
+  /**
+   * Clear all listeners and the event queue.
    */
   clear(): void {
     this.listeners.clear();
@@ -299,7 +268,7 @@ export class ActivityEventHandler {
   }
 
   /**
-   * Get the current event queue (for debugging).
+   * Get the current event queue (snapshot for debugging).
    */
   getEventQueue(): ActivityEvent[] {
     return [...this.eventQueue];
@@ -307,6 +276,7 @@ export class ActivityEventHandler {
 
   /**
    * Set the maximum queue size.
+   * Trims the queue immediately if it exceeds the new limit.
    */
   setMaxQueueSize(size: number): void {
     this.maxQueueSize = size;
@@ -318,14 +288,11 @@ export class ActivityEventHandler {
 
   /**
    * Destroy the event handler.
+   * Clears all listeners, the event queue, and resets the initialized flag.
+   * After destroy the handler can be re-initialized if needed.
    */
   destroy(): void {
     this.clear();
-    try {
-      emitter.off(ActivityEventHandler.EVENT_ID);
-    } catch (error) {
-      AppLog.et('Failed to unregister emitter', error as Error);
-    }
     this.isInitialized = false;
     AppLog.i('ActivityEventHandler destroyed');
   }

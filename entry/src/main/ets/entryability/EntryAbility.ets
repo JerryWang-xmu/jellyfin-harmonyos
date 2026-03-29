@@ -42,6 +42,9 @@ const DOMAIN = 0x0000;
 const TAG = 'Jellyfin';
 
 export default class EntryAbility extends UIAbility {
+  private cachedDensity: number = 0;
+  private mainWindow: window.Window | null = null;
+
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     // 预初始化 Web 引擎，将 WebKit 内核加载提前到 Ability 创建阶段，
     // 避免首次打开 WebView 时的冷启动白屏延迟（约减少 ~100ms）
@@ -72,6 +75,12 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, '%{public}s', 'Ability onWindowStageCreate');
 
     const setupImmersive = (win: window.Window): void => {
+      // 缓存窗口引用，用于 onWindowStageDestroy 中注销监听器
+      this.mainWindow = win;
+
+      // 缓存 density 值（会话期间不变），避免每次回调都同步调用 display API
+      this.cachedDensity = display.getDefaultDisplaySync().densityPixels;
+
       // 1. 全屏布局：内容延伸到状态栏和导航条下方
       win.setWindowLayoutFullScreen(true).catch((e: BusinessError) => {
         hilog.warn(DOMAIN, TAG, 'setWindowLayoutFullScreen failed: %{public}s', e.message);
@@ -89,22 +98,20 @@ export default class EntryAbility extends UIAbility {
 
       // 3. 读取安全区高度并写入 AppStorage
       const syncAvoidArea = (win2: window.Window): void => {
-        const density = display.getDefaultDisplaySync().densityPixels;
         const topArea = win2.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
-        AppStorage.setOrCreate('topRectHeight', topArea.topRect.height / density);
+        AppStorage.setOrCreate('topRectHeight', topArea.topRect.height / this.cachedDensity);
 
         const bottomArea = win2.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR);
-        AppStorage.setOrCreate('bottomRectHeight', bottomArea.bottomRect.height / density);
+        AppStorage.setOrCreate('bottomRectHeight', bottomArea.bottomRect.height / this.cachedDensity);
       };
       syncAvoidArea(win);
 
       // 4. 监听安全区变化（旋转、折叠屏等场景）
       win.on('avoidAreaChange', (data) => {
-        const density = display.getDefaultDisplaySync().densityPixels;
         if (data.type === window.AvoidAreaType.TYPE_SYSTEM) {
-          AppStorage.setOrCreate('topRectHeight', data.area.topRect.height / density);
+          AppStorage.setOrCreate('topRectHeight', data.area.topRect.height / this.cachedDensity);
         } else if (data.type === window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR) {
-          AppStorage.setOrCreate('bottomRectHeight', data.area.bottomRect.height / density);
+          AppStorage.setOrCreate('bottomRectHeight', data.area.bottomRect.height / this.cachedDensity);
         }
       });
     };
@@ -137,6 +144,16 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageDestroy(): void {
+    // 注销 avoidAreaChange 监听器，避免窗口销毁后回调泄漏
+    if (this.mainWindow) {
+      try {
+        this.mainWindow.off('avoidAreaChange');
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'Failed to unregister avoidAreaChange listener: %{public}s', JSON.stringify(e));
+      }
+      this.mainWindow = null;
+    }
+    this.cachedDensity = 0;
     hilog.info(DOMAIN, TAG, '%{public}s', 'Ability onWindowStageDestroy');
   }
 

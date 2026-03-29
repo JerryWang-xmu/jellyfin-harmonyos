@@ -24,99 +24,136 @@
  * Rewritten in 'ArkTS' with modifications by WangRuijie on 2026-03-22
  */
 
-import { BridgeChannel } from '../bridge/BridgeChannel';
-import { Logger } from '../common/utils/Logger';
-import { ActivityEventHandler } from '../core/event/ActivityEventHandler';
-import { ActivityEventType, createEvent } from '../core/event/ActivityEvent';
-
 /**
- * Webapp Function Channel
- * Provides specific Jellyfin web app integration functions
+ * WebappFunctionChannel
+ * Provides a native-to-web event forwarding channel.
+ *
+ * Responsibilities:
+ * - Forward native-side events (media session, volume, etc.) to the Jellyfin Web App
+ * - Offer convenience methods for specific notifications (user login, server connected, etc.)
+ *
+ * All dependencies are injected via the constructor. Call initialize() to subscribe
+ * to event-handler events, and destroy() to clean up.
  */
+
+import { BridgeChannel } from '../bridge/BridgeChannel';
+import { ActivityEventHandler, ActivityEventCallback } from '../core/event/ActivityEventHandler';
+import { ActivityEventType, ActivityEvent } from '../core/event/ActivityEvent';
+import { Logger } from '../common/utils/Logger';
+
 export class WebappFunctionChannel {
-  private static instance: WebappFunctionChannel;
+  private static readonly TAG: string = 'WebappFunctionChannel';
+
   private bridgeChannel: BridgeChannel;
+  private eventHandler: ActivityEventHandler;
+  private initialized: boolean = false;
 
-  private constructor() {
-    this.bridgeChannel = BridgeChannel.getInstance();
-    this.setupEventListeners();
-  }
+  // Keep unsubscribe functions so destroy() can clean them up
+  private unsubscribeFns: (() => void)[] = [];
 
-  static getInstance(): WebappFunctionChannel {
-    if (!WebappFunctionChannel.instance) {
-      WebappFunctionChannel.instance = new WebappFunctionChannel();
-    }
-    return WebappFunctionChannel.instance;
-  }
-
-  private setupEventListeners(): void {
-    const eventHandler = ActivityEventHandler.getInstance();
-
-    // Listen for playback events and forward to webapp
-    eventHandler.subscribe(ActivityEventType.PLAYBACK_START, (event) => {
-      this.notifyWebapp('playbackStart', event.data);
-    });
-
-    eventHandler.subscribe(ActivityEventType.PLAYBACK_STOP, (event) => {
-      this.notifyWebapp('playbackStop', event.data);
-    });
-
-    eventHandler.subscribe(ActivityEventType.PLAYBACK_PROGRESS, (event) => {
-      this.notifyWebapp('playbackProgress', event.data);
-    });
+  constructor(bridgeChannel: BridgeChannel, eventHandler: ActivityEventHandler) {
+    this.bridgeChannel = bridgeChannel;
+    this.eventHandler = eventHandler;
+    Logger.i(WebappFunctionChannel.TAG, 'WebappFunctionChannel created');
   }
 
   /**
-   * Notify webapp about user login
+   * Subscribe to native events that need to be forwarded to the web app.
+   * Safe to call multiple times; subsequent calls are no-ops.
+   */
+  initialize(): void {
+    if (this.initialized) {
+      Logger.w(WebappFunctionChannel.TAG, 'Already initialized, skipping');
+      return;
+    }
+
+    this.subscribeEvent(ActivityEventType.UPDATE_MEDIA_SESSION, (event) => {
+      this.bridgeChannel.callFunction('window.NativeShell.updateMediaSession', event.payload ?? null);
+    });
+
+    this.subscribeEvent(ActivityEventType.HIDE_MEDIA_SESSION, () => {
+      this.bridgeChannel.callFunction('window.NativeShell.hideMediaSession');
+    });
+
+    this.initialized = true;
+    Logger.i(WebappFunctionChannel.TAG, 'WebappFunctionChannel initialized');
+  }
+
+  /**
+   * Clean up all subscriptions. Safe to call multiple times.
+   */
+  destroy(): void {
+    if (!this.initialized && this.unsubscribeFns.length === 0) {
+      return;
+    }
+
+    for (const unsub of this.unsubscribeFns) {
+      unsub();
+    }
+    this.unsubscribeFns = [];
+    this.initialized = false;
+    Logger.i(WebappFunctionChannel.TAG, 'WebappFunctionChannel destroyed');
+  }
+
+  // ==================== Notification Methods ====================
+
+  /**
+   * Notify the web app that a user has logged in.
    */
   notifyUserLogin(userId: string, userName: string): void {
-    this.bridgeChannel.sendMessageToWeb('userLogin', {
-      userId: userId,
-      userName: userName
-    });
-    Logger.info('Notified webapp of user login: %{public}s', userName);
+    this.notifyWebapp('userLogin', { userId, userName });
+    Logger.i(WebappFunctionChannel.TAG, 'Notified webapp of user login: %{public}s', userName);
   }
 
   /**
-   * Notify webapp about server connection
+   * Notify the web app that a server connection has been established.
    */
   notifyServerConnected(serverUrl: string, serverName: string): void {
-    this.bridgeChannel.sendMessageToWeb('serverConnected', {
-      serverUrl: serverUrl,
-      serverName: serverName
-    });
-    Logger.info('Notified webapp of server connection: %{public}s', serverName);
+    this.notifyWebapp('serverConnected', { serverUrl, serverName });
+    Logger.i(WebappFunctionChannel.TAG, 'Notified webapp of server connection: %{public}s', serverName);
   }
 
   /**
-   * Send download progress to webapp
+   * Send download progress to the web app.
    */
   notifyDownloadProgress(itemId: string, progress: number): void {
-    this.bridgeChannel.sendMessageToWeb('downloadProgress', {
-      itemId: itemId,
-      progress: progress
-    });
+    this.notifyWebapp('downloadProgress', { itemId, progress });
   }
 
   /**
-   * Generic notification to webapp
-   */
-  notifyWebapp(eventName: string, data?: Record<string, Object>): void {
-    this.bridgeChannel.sendMessageToWeb(eventName, data || {});
-  }
-
-  /**
-   * Request webapp to navigate to specific page
+   * Request the web app to navigate to a specific route.
    */
   navigateTo(route: string): void {
-    this.bridgeChannel.sendMessageToWeb('navigate', { route: route });
-    Logger.debug('Requested navigation to: %{public}s', route);
+    this.notifyWebapp('navigate', { route });
+    Logger.d(WebappFunctionChannel.TAG, 'Requested navigation to: %{public}s', route);
   }
 
   /**
-   * Update playback state in webapp
+   * Report playback state to the web app.
    */
   reportPlaybackState(state: Record<string, Object>): void {
-    this.bridgeChannel.sendMessageToWeb('playbackState', state);
+    this.notifyWebapp('playbackState', state);
+  }
+
+  /**
+   * Generic notification to the web app.
+   * Calls window.NativeShell.notifyEvent(eventName, data) in the WebView.
+   */
+  notifyWebapp(eventName: string, data?: Record<string, Object>): void {
+    this.bridgeChannel.callFunction(
+      'window.NativeShell.notifyEvent',
+      eventName,
+      data ?? {}
+    );
+  }
+
+  // ==================== Private Helpers ====================
+
+  /**
+   * Subscribe to an event type and track the unsubscribe function.
+   */
+  private subscribeEvent(type: ActivityEventType, callback: ActivityEventCallback): void {
+    const unsub = this.eventHandler.subscribe(type, callback);
+    this.unsubscribeFns.push(unsub);
   }
 }

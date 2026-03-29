@@ -51,23 +51,43 @@ export interface DeviceInformation {
 /**
  * NativeInterface 桥接类
  * 提供给 JavaScript 调用的原生接口
+ *
+ * 性能优化：deviceId 和 deviceInfoJSON 在构造时生成并缓存，
+ * 避免每次 JS 调用 getDeviceInformation() 时执行同步 I/O。
  */
 export class NativeInterface {
   private static readonly TAG: string = 'NativeInterface';
+  private static readonly DEVICE_ID_KEY: string = 'device_id';
 
   private context: Context;
   private eventHandler: ActivityEventHandler;
   private preferences: AppPreferences;
   private bridgeChannel: BridgeChannel | null = null;
 
-  // 设备信息缓存
-  private deviceInfo: DeviceInformation | null = null;
+  // 设备信息缓存 — 初始化后不再做 I/O
+  private cachedDeviceId: string = '';
+  private cachedDeviceInfoJson: string = '';
 
   constructor(context: Context, eventHandler: ActivityEventHandler, preferences: AppPreferences) {
     this.context = context;
     this.eventHandler = eventHandler;
     this.preferences = preferences;
-    Logger.i(NativeInterface.TAG, 'NativeInterface created');
+
+    // 同步初始化缓存：从 prefs 读取或生成新的 deviceId
+    this.cachedDeviceId = this.loadOrGenerateDeviceId();
+    this.cachedDeviceInfoJson = this.buildDeviceInfoJson();
+
+    Logger.i(NativeInterface.TAG, 'NativeInterface created (deviceId cached)');
+  }
+
+  /**
+   * 异步初始化入口（保留扩展性）。
+   * 当前缓存已在构造函数中同步完成，此方法供将来可能的异步场景使用。
+   */
+  async initialize(): Promise<void> {
+    // 缓存已在构造函数中同步完成，此处为空操作。
+    // 如果未来 deviceId 需要通过异步 API 获取，可以在此处重新赋值缓存。
+    Logger.i(NativeInterface.TAG, 'NativeInterface initialize (no-op, cache already ready)');
   }
 
   /**
@@ -77,43 +97,20 @@ export class NativeInterface {
     this.bridgeChannel = channel;
   }
 
-  /**
-   * 初始化设备信息
-   */
-  async initializeDeviceInfo(): Promise<void> {
-    try {
-      // 获取设备信息
-      const deviceInfo = this.getDeviceInformation();
-      if (deviceInfo) {
-        this.deviceInfo = JSON.parse(deviceInfo);
-        Logger.i(NativeInterface.TAG, 'Device info initialized: %{public}s', deviceInfo);
-      }
-    } catch (error) {
-      Logger.e(NativeInterface.TAG, 'Failed to initialize device info: %{public}s', JSON.stringify(error));
-    }
-  }
-
   // ============ JavaScript 可调用方法 ============
 
   /**
    * 获取设备信息
+   * 直接返回缓存的 JSON 字符串，零 I/O 开销。
    * @returns JSON 格式的设备信息字符串
    */
   getDeviceInformation(): string | null {
-    try {
-      // 在 HarmonyOS 中获取设备信息
-      const deviceInfo: DeviceInformation = {
-        deviceId: this.getDeviceId(),
-        deviceName: this.getDeviceName(),
-        appName: Constants.APP_INFO_NAME,
-        appVersion: Constants.APP_INFO_VERSION
-      };
-
-      return JSON.stringify(deviceInfo);
-    } catch (error) {
-      Logger.e(NativeInterface.TAG, 'Failed to get device information: %{public}s', JSON.stringify(error));
-      return null;
+    if (this.cachedDeviceInfoJson.length > 0) {
+      return this.cachedDeviceInfoJson;
     }
+    // 极端回退：缓存为空时重新构建（不应发生）
+    this.cachedDeviceInfoJson = this.buildDeviceInfoJson();
+    return this.cachedDeviceInfoJson.length > 0 ? this.cachedDeviceInfoJson : null;
   }
 
   /**
@@ -298,30 +295,54 @@ export class NativeInterface {
   // ============ 私有辅助方法 ============
 
   /**
-   * 获取设备 ID（持久化存储，基于 UUID v4）
-   * 在 HarmonyOS 中通过 preferences 持久化设备唯一标识符
+   * 从 preferences 读取 deviceId，若不存在则生成新的 UUID v4 并持久化。
+   * 仅在构造函数中调用一次。
    */
-  private getDeviceId(): string {
+  private loadOrGenerateDeviceId(): string {
     try {
-      const DEVICE_ID_KEY = 'device_id';
       const prefs = this.preferences.getRawPreferences();
-      let id = prefs ? (prefs.getSync(DEVICE_ID_KEY, '') as string) : '';
+      let id = prefs ? (prefs.getSync(NativeInterface.DEVICE_ID_KEY, '') as string) : '';
       if (!id || id.length === 0) {
-        // 生成 UUID v4
-        id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-          const r = Math.random() * 16 | 0;
-          const v = c === 'x' ? r : (r & 0x3 | 0x8);
-          return v.toString(16);
-        });
+        id = this.generateUuidV4();
         if (prefs) {
-          prefs.putSync(DEVICE_ID_KEY, id);
+          prefs.putSync(NativeInterface.DEVICE_ID_KEY, id);
           prefs.flush();
         }
       }
       return id;
     } catch (error) {
-      Logger.e(NativeInterface.TAG, 'Failed to get device ID: %{public}s', JSON.stringify(error));
+      Logger.e(NativeInterface.TAG, 'Failed to load device ID: %{public}s', JSON.stringify(error));
       return 'unknown_device';
+    }
+  }
+
+  /**
+   * 生成 UUID v4
+   */
+  private generateUuidV4(): string {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  /**
+   * 构建设备信息 JSON 字符串（使用已缓存的 deviceId）。
+   * 仅在构造函数或缓存失效时调用。
+   */
+  private buildDeviceInfoJson(): string {
+    try {
+      const info: DeviceInformation = {
+        deviceId: this.cachedDeviceId,
+        deviceName: this.getDeviceName(),
+        appName: Constants.APP_INFO_NAME,
+        appVersion: Constants.APP_INFO_VERSION
+      };
+      return JSON.stringify(info);
+    } catch (error) {
+      Logger.e(NativeInterface.TAG, 'Failed to build device info JSON: %{public}s', JSON.stringify(error));
+      return '';
     }
   }
 

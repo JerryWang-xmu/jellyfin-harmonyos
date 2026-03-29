@@ -36,6 +36,7 @@ import { App, getContext } from '../core/di/AppDependency';
 import { ActivityEventType, ChangeFullscreenPayload } from '../core/event/ActivityEvent';
 import { AppLog } from '../common/utils/Logger';
 import { NAV_DEST_CONNECT } from '../pages/NavDestinationNames';
+import { PageLoadState, PageLoadStatus, FULLSCREEN_SHIM_SCRIPT } from './WebViewPageState';
 
 export interface WebViewPageParams {
   serverUrl: string;
@@ -49,9 +50,8 @@ export struct WebViewPage {
   @StorageProp('topRectHeight') topRectHeight: number = 0;
   @State serverUrl: string = '';
   @State serverId: number = 0;
-  @State isLoading: boolean = true;
-  @State loadError: boolean = false;
-  @State loadErrorMsg: string = '';
+  @State loadState: PageLoadState = new PageLoadState();
+  private fullscreenShimInjected: boolean = false;
 
   controller: webview.WebviewController = new webview.WebviewController();
   private bridgeManager: BridgeManager | null = null;
@@ -78,13 +78,11 @@ export struct WebViewPage {
       AppLog.e('WebViewPage: prepareForPageLoad error: %{public}s', JSON.stringify(e));
     }
 
-    // 启动加载超时计时（10 秒）
+    // 启动加载超时计时（10 秒）— P8: consolidated into single loadState transition
     this.loadTimeoutId = setTimeout(() => {
-      if (this.isLoading) {
+      if (this.loadState.isLoading()) {
         AppLog.e('WebViewPage: load timeout');
-        this.isLoading = false;
-        this.loadError = true;
-        this.loadErrorMsg = '连接超时，请检查服务器地址';
+        this.loadState = PageLoadState.error('连接超时，请检查服务器地址');
       }
     }, 10000) as number;
 
@@ -120,7 +118,8 @@ export struct WebViewPage {
             .javaScriptAccess(true)
             .domStorageAccess(true)
             .fileAccess(true)
-            .keyboardAvoidMode(WebKeyboardAvoidMode.RESIZE_VISUAL)
+            .keyboardAvoidMode(WebKeyboardAvoidMode.RESIZE_CONTENT)
+            .expandSafeArea([SafeAreaType.KEYBOARD])
             .onlineImageAccess(true)
             .mixedMode(MixedMode.All)
             .cacheMode(CacheMode.Default)
@@ -133,14 +132,13 @@ export struct WebViewPage {
             })
             .onPageBegin(() => {
               AppLog.i('WebViewPage: onPageBegin');
-              this.isLoading = true;
-              this.loadError = false;
+              this.loadState = PageLoadState.loading();
             })
             .onPageEnd(() => {
               AppLog.i('WebViewPage: onPageEnd');
               clearTimeout(this.loadTimeoutId);
               this.loadTimeoutId = -1;
-              this.isLoading = false;
+              this.loadState = PageLoadState.loaded();
               this.injectFullscreenBridge();
             })
             .onErrorReceive((event) => {
@@ -153,13 +151,11 @@ export struct WebViewPage {
               AppLog.e('WebViewPage: onErrorReceive (main frame): %{public}s', msg);
               clearTimeout(this.loadTimeoutId);
               this.loadTimeoutId = -1;
-              this.isLoading = false;
-              this.loadError = true;
-              this.loadErrorMsg = msg;
+              this.loadState = PageLoadState.error(msg);
             })
 
           // 加载指示器覆盖层
-          if (this.isLoading) {
+          if (this.loadState.isLoading()) {
             Column() {
               LoadingProgress()
                 .width(48)
@@ -172,15 +168,14 @@ export struct WebViewPage {
             .backgroundColor('#000000')
           }
 
-          // 错误提示覆盖层
-          if (this.loadError) {
+          if (this.loadState.hasError()) {
             Column({ space: 16 }) {
               Text('连接失败')
                 .fontSize(20)
                 .fontColor('#ffffff')
                 .fontWeight(FontWeight.Bold)
 
-              Text(this.loadErrorMsg)
+              Text(this.loadState.getErrorMessage())
                 .fontSize(14)
                 .fontColor('#b0b0b0')
                 .textAlign(TextAlign.Center)
@@ -192,14 +187,11 @@ export struct WebViewPage {
                 .backgroundColor('#00a4dc')
                 .fontColor('#ffffff')
                 .onClick(() => {
-                  this.loadError = false;
-                  this.isLoading = true;
+                  this.loadState = PageLoadState.loading();
                   // 重置超时计时器
                   this.loadTimeoutId = setTimeout(() => {
-                    if (this.isLoading) {
-                      this.isLoading = false;
-                      this.loadError = true;
-                      this.loadErrorMsg = '连接超时，请检查服务器地址';
+                    if (this.loadState.isLoading()) {
+                      this.loadState = PageLoadState.error('连接超时，请检查服务器地址');
                     }
                   }, 10000) as number;
                   this.controller.loadUrl(this.serverUrl);
@@ -257,26 +249,17 @@ export struct WebViewPage {
    * 以及 HTMLElement.prototype.requestFullscreen，将全屏请求路由到我们的
    * 原生桥接，从而触发屏幕旋转。
    */
+  /**
+   * P6-MEDIUM: Fullscreen shim injected only once via guard flag.
+   * Script is extracted to static constant FULLSCREEN_SHIM_SCRIPT.
+   */
   private injectFullscreenBridge(): void {
-    const script: string =
-      '(function(){' +
-      'if(window.__jfFsBridged)return;' +
-      'window.__jfFsBridged=true;' +
-      // 拦截 requestFullscreen，在触发浏览器全屏之前立即通知原生端
-      'var _origReq=HTMLElement.prototype.requestFullscreen;' +
-      'HTMLElement.prototype.requestFullscreen=function(){' +
-      'if(window.NativeInterface)window.NativeInterface.enableFullscreen();' +
-      'return _origReq?_origReq.call(this):Promise.resolve();' +
-      '};' +
-      // 监听 fullscreenchange 作为兜底（exitFullscreen 由此触发 disableFullscreen）
-      'document.addEventListener("fullscreenchange",function(){' +
-      'if(!window.NativeInterface)return;' +
-      'if(document.fullscreenElement){window.NativeInterface.enableFullscreen();}' +
-      'else{window.NativeInterface.disableFullscreen();}' +
-      '});' +
-      '})();';
+    if (this.fullscreenShimInjected) {
+      return;
+    }
     try {
-      this.controller.runJavaScript(script);
+      this.controller.runJavaScript(FULLSCREEN_SHIM_SCRIPT);
+      this.fullscreenShimInjected = true;
       AppLog.i('WebViewPage: fullscreen bridge shim injected');
     } catch (e) {
       AppLog.e('WebViewPage: injectFullscreenBridge error: %{public}s', JSON.stringify(e));

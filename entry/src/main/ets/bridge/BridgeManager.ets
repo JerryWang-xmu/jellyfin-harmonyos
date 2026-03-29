@@ -119,6 +119,14 @@ export class BridgeManager {
   // 状态
   private initialized: boolean = false;
 
+  /**
+   * 代理注册标志。
+   * 一旦 JavaScript 代理通过 registerJavaScriptProxy + refresh 注册完毕，
+   * 后续的 onControllerAttached 回调不应再重复整个初始化流程（避免页面重载闪烁）。
+   * 仅在 destroy() 或 reinitialize() 中重置。
+   */
+  private isBridgeInitialized: boolean = false;
+
   constructor(config: BridgeManagerConfig) {
     this.context = config.context;
     this.controller = config.controller;
@@ -129,9 +137,16 @@ export class BridgeManager {
   }
 
   /**
-   * 初始化桥接管理器
+   * 初始化桥接管理器。
+   * 幂等方法：如果代理已注册（isBridgeInitialized=true），直接返回，
+   * 避免导航返回时重复初始化导致 WebView 页面重载。
    */
   async initialize(): Promise<void> {
+    if (this.isBridgeInitialized) {
+      Logger.i(BridgeManager.TAG, 'Bridge proxies already registered, skipping re-initialization');
+      return;
+    }
+
     if (this.initialized) {
       Logger.w(BridgeManager.TAG, 'BridgeManager already initialized');
       return;
@@ -150,15 +165,16 @@ export class BridgeManager {
       await this.bridgeChannel.initialize();
 
       // 2. 创建桥接接口
-      this.interfaces = this.createInterfaces();
+      this.interfaces = await this.createInterfaces();
 
       // 3. 创建代理
       this.proxies = this.createProxies();
 
-      // 4. 注册 JavaScript 代理
+      // 4. 注册 JavaScript 代理（包含唯一一次 refresh 调用）
       this.registerJavaScriptProxies();
 
       this.initialized = true;
+      this.isBridgeInitialized = true;
       Logger.i(BridgeManager.TAG, 'BridgeManager initialized successfully');
     } catch (error) {
       Logger.e(BridgeManager.TAG, 'Failed to initialize BridgeManager: %{public}s', JSON.stringify(error));
@@ -169,13 +185,16 @@ export class BridgeManager {
   /**
    * 创建桥接接口
    */
-  private createInterfaces(): BridgeInterfaces {
+  private async createInterfaces(): Promise<BridgeInterfaces> {
     const nativeInterface = new NativeInterface(
       this.context,
       this.eventHandler,
       this.preferences
     );
     nativeInterface.setBridgeChannel(this.bridgeChannel!);
+    // initialize() is currently a no-op (cache is built in constructor),
+    // but we await it for future-proofing in case async init is needed later.
+    await nativeInterface.initialize();
 
     const nativePlayer = new NativePlayer(
       this.preferences,
@@ -340,10 +359,16 @@ export class BridgeManager {
   }
 
   /**
-   * 销毁桥接管理器
+   * 销毁桥接管理器。
+   * 清理所有接口的 listeners、bridgeChannel 引用，并重置状态标志。
    */
   destroy(): void {
     Logger.i(BridgeManager.TAG, 'Destroying BridgeManager...');
+
+    // 清理各接口的 listeners
+    if (this.interfaces) {
+      this.interfaces.nativePlayer.clearListeners();
+    }
 
     // 销毁桥接通道
     this.bridgeChannel?.destroy();
@@ -354,7 +379,20 @@ export class BridgeManager {
     this.proxies = null;
 
     this.initialized = false;
+    this.isBridgeInitialized = false;
     Logger.i(BridgeManager.TAG, 'BridgeManager destroyed');
+  }
+
+  /**
+   * 强制重新初始化桥接管理器。
+   * 用于需要完全重建的场景（如切换服务器）。
+   * 先销毁当前状态，再执行完整初始化。
+   */
+  async reinitialize(): Promise<void> {
+    Logger.i(BridgeManager.TAG, 'Reinitializing BridgeManager...');
+    this.destroy();
+    await this.initialize();
+    Logger.i(BridgeManager.TAG, 'BridgeManager reinitialized');
   }
 }
 

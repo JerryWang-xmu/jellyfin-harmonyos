@@ -112,7 +112,11 @@ export class AppPreferences {
    */
   async save(): Promise<void> {
     if (this.prefs) {
-      await this.prefs.flush();
+      try {
+        await this.prefs.flush();
+      } catch (error) {
+        PrefLog.e('Failed to flush preferences: %{public}s', (error as Error)?.message ?? 'unknown');
+      }
       PrefLog.d('Preferences saved');
     }
   }
@@ -366,8 +370,12 @@ export class AppPreferences {
    */
   async clear(): Promise<void> {
     if (this.prefs) {
-      await this.prefs.clear();
-      await this.prefs.flush();
+      try {
+        await this.prefs.clear();
+        await this.prefs.flush();
+      } catch (error) {
+        PrefLog.e('Failed to clear preferences: %{public}s', (error as Error)?.message ?? 'unknown');
+      }
       PrefLog.i('All preferences cleared');
     }
   }
